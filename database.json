@@ -1,0 +1,32 @@
+{
+  "adminKeys": {
+    "YANZ-MASTER-KEY-2026": {
+      "createdAt": 1725000000000,
+      "activeDevice": null,
+      "disabled": false,
+      "note": "Ganti / hapus key ini setelah deploy. Buat key baru lewat admin panel."
+    }
+  },
+  "global": {
+    "status": {
+      "online": true,
+      "updatedAt": 1725000000000
+    }
+  },
+  "products": {
+    "prod_demo_1": {
+      "name": "Demo Product Premium",
+      "price": 50000,
+      "desc": "Contoh produk. Ganti atau hapus via Admin Panel. Video & download bisa diisi.",
+      "download": "https://example.com/download-demo.zip",
+      "video": "",
+      "discount": 20,
+      "discountDays": 7,
+      "discountStart": 1725000000000,
+      "createdAt": 1725000000000,
+      "updatedAt": 1725000000000
+    }
+  },
+  "orders": {},
+  "users": {}
+}
