@@ -9,7 +9,7 @@ const CONFIG = {
   qrPaymentUrl: "https://files.catbox.moe/placeholder-qr.png",
 
   // Link video dashboard di halaman Home (mp4 Catbox / YouTube)
-  dashboardVideoUrl: "https://files.catbox.moe/mxm0hs.mp4",
+  dashboardVideoUrl: "https://files.catbox.moe/placeholder-video.mp4",
 
   // ========== KONTAK ==========
   supportEmail: "yansupport1@gmail.com",

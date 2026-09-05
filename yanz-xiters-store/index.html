@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#8B0000" />
+  <meta name="description" content="Yanz Xiters Store - Premium Digital Products" />
+  <title>Yanz Xiters Store</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9889;</text></svg>" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="css/style.css" />
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+</head>
+<body class="no-select">
+
+  <div class="ambient ambient-1"></div>
+  <div class="ambient ambient-2"></div>
+
+  <header class="header" id="mainHeader">
+    <div class="container header-inner">
+      <a class="logo" onclick="App.showView('home')">
+        <span class="logo-mark"><i class="fa-solid fa-bolt"></i></span>
+        <span class="neon">Yanz Xiters</span>
+      </a>
+      <nav class="nav">
+        <button class="nav-btn active" data-view="home" onclick="App.showView('home')">
+          <i class="fa-solid fa-house"></i><span>Home</span>
+        </button>
+        <button class="nav-btn" data-view="products" onclick="App.showView('products')">
+          <i class="fa-solid fa-box"></i><span>Produk</span>
+        </button>
+        <button class="nav-btn" data-view="profile" onclick="App.showView('profile')">
+          <i class="fa-solid fa-user"></i><span>Profil</span>
+        </button>
+        <button class="nav-btn" data-view="admin" onclick="App.showView('admin')">
+          <i class="fa-solid fa-shield-halved"></i><span>Admin</span>
+        </button>
+        <span id="globalStatus" class="status-badge status-off">
+          <span class="dot"></span> OFF
+        </span>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- HOME -->
+    <section id="view-home" class="view active">
+      <div class="hero">
+        <h1 class="neon">Yanz Xiters Store</h1>
+        <p>Premium digital products. Aman, cepat, dan otomatis.</p>
+        <div class="running-time" id="runningTime">
+          <i class="fa-solid fa-clock"></i>
+          <span>00:00:00</span>
+        </div>
+      </div>
+
+      <div class="video-box glass" id="dashboardVideoBox">
+        <div class="video-placeholder">
+          <i class="fa-solid fa-play"></i>
+          <span>Video Dashboard (atur di config.js)</span>
+        </div>
+      </div>
+
+      <h2 class="section-title neon-soft">
+        <i class="fa-solid fa-fire"></i> Produk Unggulan
+      </h2>
+      <div class="products-grid" id="homeProducts">
+        <div class="loader"></div>
+      </div>
+    </section>
+
+    <!-- PRODUCTS -->
+    <section id="view-products" class="view">
+      <h2 class="section-title neon-soft" style="margin-top:36px">
+        <i class="fa-solid fa-boxes-stacked"></i> Semua Produk
+      </h2>
+      <div class="products-grid" id="allProducts">
+        <div class="loader"></div>
+      </div>
+    </section>
+
+    <!-- PROFILE -->
+    <section id="view-profile" class="view">
+      <div class="profile-card glass">
+        <h2 class="neon"><i class="fa-solid fa-id-card"></i> Profil</h2>
+        <p style="color:var(--muted);margin-top:6px;font-size:0.9rem">ID unik yang terbawa ke setiap pembelian</p>
+        <div class="profile-id" id="userIdDisplay">-</div>
+        <p style="font-size:0.82rem;color:var(--muted)">ID tersimpan otomatis dan tidak direset.</p>
+        <div class="mt-3 text-left">
+          <h3 style="margin-bottom:14px;font-size:1rem;display:flex;align-items:center;gap:8px">
+            <i class="fa-solid fa-bag-shopping"></i> Riwayat Pembelian
+          </h3>
+          <div id="userPurchases" class="empty">
+            <i class="fa-solid fa-inbox"></i>
+            Belum ada pembelian
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PAYMENT -->
+    <section id="view-payment" class="view">
+      <div class="payment-wrap glass">
+        <h2 class="neon"><i class="fa-solid fa-credit-card"></i> Pembayaran</h2>
+        <p>Transfer sesuai nominal lalu kirim bukti transfer</p>
+
+        <div class="order-info" id="orderInfo"></div>
+
+        <div class="qr-box" id="qrBox">
+          <img id="qrImg" src="" alt="QR Payment" />
+        </div>
+        <p style="font-size:0.84rem;color:var(--muted);margin-bottom:18px">Scan QR di atas untuk transfer</p>
+
+        <div class="form-group">
+          <label>Link Bukti Transfer</label>
+          <input type="text" id="buktiTfUrl" placeholder="https://... (Catbox / Imgur / dll)" />
+        </div>
+        <button class="btn btn-primary btn-block" onclick="App.submitBuktiTf()">
+          <i class="fa-solid fa-paper-plane"></i> Kirim Bukti TF
+        </button>
+        <p style="margin-top:16px;font-size:0.78rem;color:var(--muted)">
+          Halaman ini tersimpan. Jangan ditutup sampai status berubah.
+        </p>
+        <div id="paymentStatus" class="mt-2"></div>
+      </div>
+    </section>
+
+    <!-- ADMIN -->
+    <section id="view-admin" class="view">
+
+      <!-- Login -->
+      <div id="adminLogin" class="admin-login-wrap">
+        <div class="admin-login-card glass glass-strong">
+          <div class="admin-login-icon">
+            <i class="fa-solid fa-lock"></i>
+          </div>
+          <h2 class="neon">Admin Login</h2>
+          <p class="subtitle">Masukkan key valid. Maksimal 1 device.</p>
+          <div class="form-group">
+            <label>Admin Key</label>
+            <input type="password" id="adminKeyInput" placeholder="Masukkan key..." autocomplete="off" />
+          </div>
+          <button class="btn btn-primary btn-block" onclick="App.adminLogin()">
+            <i class="fa-solid fa-right-to-bracket"></i> Masuk
+          </button>
+          <p class="support-note">
+            Error? Hubungi
+            <a href="mailto:yansupport1@gmail.com">yansupport1@gmail.com</a>
+            atau Telegram <a href="https://t.me/yanzking122" target="_blank">@yanzking122</a>
+          </p>
+        </div>
+      </div>
+
+      <!-- Panel -->
+      <div id="adminPanel" style="display:none">
+        <div class="admin-layout">
+          <aside class="admin-sidebar glass">
+            <div class="admin-sidebar-title neon">
+              <i class="fa-solid fa-shield-halved"></i> Admin
+            </div>
+            <div class="admin-menu">
+              <button class="admin-menu-btn active" data-section="orders" onclick="App.showAdminSection('orders')">
+                <i class="fa-solid fa-receipt"></i> Bukti TF
+              </button>
+              <button class="admin-menu-btn" data-section="products" onclick="App.showAdminSection('products')">
+                <i class="fa-solid fa-box"></i> Produk
+              </button>
+              <button class="admin-menu-btn" data-section="addproduct" onclick="App.showAdminSection('addproduct')">
+                <i class="fa-solid fa-plus"></i> Tambah Produk
+              </button>
+              <button class="admin-menu-btn" data-section="status" onclick="App.showAdminSection('status')">
+                <i class="fa-solid fa-toggle-on"></i> Status ON/OFF
+              </button>
+              <button class="admin-menu-btn" data-section="keys" onclick="App.showAdminSection('keys')">
+                <i class="fa-solid fa-key"></i> Keys
+              </button>
+              <button class="admin-menu-btn" data-section="users" onclick="App.showAdminSection('users')">
+                <i class="fa-solid fa-users"></i> Users
+              </button>
+              <button class="admin-menu-btn logout" onclick="App.adminLogout()">
+                <i class="fa-solid fa-right-from-bracket"></i> Logout
+              </button>
+            </div>
+          </aside>
+
+          <div class="admin-content">
+
+            <div id="admin-orders" class="admin-section active">
+              <h2 class="section-title"><i class="fa-solid fa-receipt"></i> Bukti Transfer</h2>
+              <div class="table-wrap glass">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Order</th>
+                      <th>User ID</th>
+                      <th>Produk</th>
+                      <th>Harga</th>
+                      <th>Bukti</th>
+                      <th>Status</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ordersTableBody">
+                    <tr><td colspan="7" class="empty">Memuat...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div id="admin-products" class="admin-section">
+              <h2 class="section-title"><i class="fa-solid fa-box"></i> Daftar Produk</h2>
+              <div class="table-wrap glass">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Nama</th>
+                      <th>Harga</th>
+                      <th>Diskon</th>
+                      <th>Video</th>
+                      <th>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody id="adminProductsBody">
+                    <tr><td colspan="5" class="empty">Memuat...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div id="admin-addproduct" class="admin-section">
+              <h2 class="section-title"><i class="fa-solid fa-plus"></i> Tambah / Edit Produk</h2>
+              <div class="glass" style="padding:28px;max-width:560px">
+                <input type="hidden" id="editProductId" />
+                <div class="form-group">
+                  <label>Nama Produk</label>
+                  <input type="text" id="pName" placeholder="Nama produk" />
+                </div>
+                <div class="form-group">
+                  <label>Harga (Rp)</label>
+                  <input type="number" id="pPrice" placeholder="50000" />
+                </div>
+                <div class="form-group">
+                  <label>Deskripsi</label>
+                  <textarea id="pDesc" placeholder="Deskripsi produk..."></textarea>
+                </div>
+                <div class="form-group">
+                  <label>Link Download (otomatis dikirim setelah verifikasi)</label>
+                  <input type="text" id="pDownload" placeholder="https://..." />
+                </div>
+                <div class="form-group">
+                  <label>Link Video (Catbox / direct / YouTube)</label>
+                  <input type="text" id="pVideo" placeholder="https://files.catbox.moe/xxx.mp4" />
+                </div>
+                <div class="form-group">
+                  <label>Diskon % (0 = tidak diskon)</label>
+                  <input type="number" id="pDiscount" placeholder="0" min="0" max="99" />
+                </div>
+                <div class="form-group">
+                  <label>Durasi Diskon (hari, 0 = tetap selama diskon aktif)</label>
+                  <input type="number" id="pDiscountDays" placeholder="0" min="0" />
+                </div>
+                <div style="display:flex;gap:12px;flex-wrap:wrap">
+                  <button class="btn btn-primary" onclick="App.saveProduct()">
+                    <i class="fa-solid fa-floppy-disk"></i> Simpan
+                  </button>
+                  <button class="btn btn-ghost" onclick="App.resetProductForm()">
+                    <i class="fa-solid fa-rotate-left"></i> Reset
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div id="admin-status" class="admin-section">
+              <h2 class="section-title"><i class="fa-solid fa-toggle-on"></i> Status Admin (Global)</h2>
+              <div class="glass status-control">
+                <p style="margin-bottom:20px;color:var(--muted);font-size:0.9rem">Status ini terlihat semua user di header</p>
+                <div id="adminStatusDisplay" class="status-badge status-off">
+                  <span class="dot"></span> OFF
+                </div>
+                <div style="display:flex;gap:14px;justify-content:center">
+                  <button class="btn btn-success" onclick="App.setGlobalStatus(true)">
+                    <i class="fa-solid fa-power-off"></i> ON
+                  </button>
+                  <button class="btn btn-danger" onclick="App.setGlobalStatus(false)">
+                    <i class="fa-solid fa-power-off"></i> OFF
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div id="admin-keys" class="admin-section">
+              <h2 class="section-title"><i class="fa-solid fa-key"></i> Admin Keys</h2>
+              <div class="glass" style="padding:26px;max-width:500px;margin-bottom:22px">
+                <div class="form-group">
+                  <label>Buat Key Baru</label>
+                  <input type="text" id="newKeyInput" placeholder="key-rahasia-123" />
+                </div>
+                <button class="btn btn-primary" onclick="App.createAdminKey()">
+                  <i class="fa-solid fa-plus"></i> Tambah Key
+                </button>
+              </div>
+              <div class="table-wrap glass">
+                <table>
+                  <thead>
+                    <tr><th>Key</th><th>Device</th><th>Last Login</th><th>Aksi</th></tr>
+                  </thead>
+                  <tbody id="keysTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div id="admin-users" class="admin-section">
+              <h2 class="section-title"><i class="fa-solid fa-users"></i> Users</h2>
+              <div class="table-wrap glass">
+                <table>
+                  <thead>
+                    <tr><th>User ID</th><th>Created</th><th>Last Seen</th></tr>
+                  </thead>
+                  <tbody id="usersTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <p>Yanz Xiters Store &copy; <span id="year"></span></p>
+    <p>Support: <a href="mailto:yansupport1@gmail.com">yansupport1@gmail.com</a> · Telegram <a href="https://t.me/yanzking122" target="_blank">@yanzking122</a></p>
+  </footer>
+
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="config.js"></script>
+  <script src="js/firebase.js"></script>
+  <script src="js/security.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // Header scroll effect
+    window.addEventListener('scroll', () => {
+      document.getElementById('mainHeader').classList.toggle('scrolled', window.scrollY > 12);
+    });
+  </script>
+</body>
+</html>
