@@ -55,7 +55,7 @@ const App = {
       const h = String(Math.floor(s / 3600)).padStart(2, '0');
       const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
       const sec = String(s % 60).padStart(2, '0');
-      el.textContent = `Web running: ${h}:${m}:${sec}`;
+      el.innerHTML = `<i class="fa-solid fa-clock"></i> <span>${h}:${m}:${sec}</span>`;
     }, 1000);
   },
 
@@ -109,7 +109,7 @@ const App = {
     const renderCard = (p, delay) => {
       const disc = this.isDiscountActive(p);
       const final = this.getFinalPrice(p);
-      let videoHtml = '<div class="video-placeholder" style="height:100%;font-size:0.8rem">No video</div>';
+      let videoHtml = '<div class="placeholder"><i class="fa-solid fa-film"></i></div>';
       if (p.video) {
         if (p.video.includes('youtube') || p.video.includes('youtu.be')) {
           const id = this.extractYoutubeId(p.video);
@@ -127,11 +127,11 @@ const App = {
             <div class="price-row">
               ${disc ? `<span class="price-old">Rp ${this.fmt(p.price)}</span>` : ''}
               <span class="price">Rp ${this.fmt(final)}</span>
-              ${disc ? `<span class="discount-badge">DISKON ${p.discount}%</span>` : ''}
+              ${disc ? `<span class="discount-badge"><i class="fa-solid fa-tag"></i> ${p.discount}%</span>` : ''}
             </div>
             <div class="product-actions">
-              <button class="btn btn-primary" style="width:100%" onclick="App.buyProduct('${p.id}')">
-                🛒 Buy Now
+              <button class="btn btn-primary btn-block" onclick="App.buyProduct('${p.id}')">
+                <i class="fa-solid fa-cart-shopping"></i> Buy Now
               </button>
             </div>
           </div>
@@ -141,7 +141,7 @@ const App = {
     const homeEl = document.getElementById('homeProducts');
     const allEl = document.getElementById('allProducts');
     if (list.length === 0) {
-      const empty = `<div class="empty"><div class="empty-icon">📦</div>Belum ada produk</div>`;
+      const empty = `<div class="empty"><i class="fa-solid fa-box-open"></i>Belum ada produk</div>`;
       homeEl.innerHTML = empty;
       allEl.innerHTML = empty;
       return;
@@ -233,15 +233,14 @@ const App = {
       const el = document.getElementById('paymentStatus');
       if (o.status === 'approved') {
         el.innerHTML = `
-          <div style="padding:16px;background:rgba(0,255,136,0.1);border-radius:12px;border:1px solid rgba(0,255,136,0.3)">
-            <strong style="color:var(--success)">✅ Pembayaran Diverifikasi!</strong>
-            <p style="margin-top:8px">Link download:</p>
-            <a href="${this.esc(o.downloadLink)}" target="_blank" class="btn btn-success" style="margin-top:10px;display:inline-flex">
-              📥 Download Produk
+          <div style="padding:18px;background:rgba(0,230,118,0.1);border-radius:14px;border:1px solid rgba(0,230,118,0.28)">
+            <strong style="color:var(--success)"><i class="fa-solid fa-circle-check"></i> Pembayaran Diverifikasi</strong>
+            <p style="margin-top:10px;font-size:0.9rem">Link download:</p>
+            <a href="${this.esc(o.downloadLink)}" target="_blank" class="btn btn-success" style="margin-top:12px;display:inline-flex">
+              <i class="fa-solid fa-download"></i> Download Produk
             </a>
           </div>`;
         clearPendingPayment();
-        // save to user purchases
         db.ref('users/' + this.userId + '/purchases/' + orderId).set({
           productName: o.productName,
           price: o.price,
@@ -250,13 +249,13 @@ const App = {
         });
       } else if (o.status === 'rejected') {
         el.innerHTML = `
-          <div style="padding:16px;background:rgba(255,50,50,0.1);border-radius:12px;border:1px solid rgba(255,50,50,0.3)">
-            <strong style="color:var(--danger)">❌ Ditolak</strong>
-            <p style="margin-top:6px;font-size:0.9rem">${this.esc(o.rejectReason || 'Bukti tidak valid')}</p>
+          <div style="padding:18px;background:rgba(255,48,64,0.1);border-radius:14px;border:1px solid rgba(255,48,64,0.28)">
+            <strong style="color:var(--danger)"><i class="fa-solid fa-circle-xmark"></i> Ditolak</strong>
+            <p style="margin-top:8px;font-size:0.9rem">${this.esc(o.rejectReason || 'Bukti tidak valid')}</p>
           </div>`;
         clearPendingPayment();
       } else {
-        el.innerHTML = `<p style="color:var(--warning)">⏳ Menunggu verifikasi admin...</p>`;
+        el.innerHTML = `<p style="color:var(--warning)"><i class="fa-solid fa-spinner fa-spin"></i> Menunggu verifikasi admin...</p>`;
       }
     });
   },
@@ -272,7 +271,7 @@ const App = {
       buktiAt: Date.now()
     }).then(() => {
       this.toast('Bukti TF terkirim! Tunggu verifikasi.', 'success');
-      document.getElementById('paymentStatus').innerHTML = '<p style="color:var(--warning)">⏳ Bukti terkirim, menunggu admin...</p>';
+      document.getElementById('paymentStatus').innerHTML = '<p style="color:var(--warning)"><i class="fa-solid fa-spinner fa-spin"></i> Bukti terkirim, menunggu admin...</p>';
     }).catch(e => this.toast(e.message, 'error'));
   },
 
@@ -386,12 +385,12 @@ const App = {
           <td style="font-size:0.75rem">${o.userId || '-'}</td>
           <td>${this.esc(o.productName)}</td>
           <td>Rp ${this.fmt(o.price)}</td>
-          <td>${o.buktiTf ? `<a href="${this.esc(o.buktiTf)}" target="_blank" style="color:var(--blood-neon)">Lihat</a>` : '-'}</td>
+          <td>${o.buktiTf ? `<a href="${this.esc(o.buktiTf)}" target="_blank" style="color:var(--blood-neon)"><i class="fa-solid fa-eye"></i> Lihat</a>` : '-'}</td>
           <td><span class="badge badge-${o.status === 'approved' ? 'approved' : o.status === 'rejected' ? 'rejected' : 'pending'}">${o.status}</span></td>
           <td>
             ${o.status === 'pending' && o.buktiTf ? `
-              <button class="btn btn-success btn-sm" onclick="App.verifyOrder('${o.id}', true)">Terima</button>
-              <button class="btn btn-danger btn-sm" onclick="App.verifyOrder('${o.id}', false)">Tolak</button>
+              <button class="btn btn-success btn-sm" onclick="App.verifyOrder('${o.id}', true)"><i class="fa-solid fa-check"></i> Terima</button>
+              <button class="btn btn-danger btn-sm" onclick="App.verifyOrder('${o.id}', false)"><i class="fa-solid fa-xmark"></i> Tolak</button>
             ` : '-'}
           </td>
         </tr>
@@ -435,8 +434,8 @@ const App = {
         <td>${p.discount ? p.discount + '%' : '-'}</td>
         <td>${p.video ? '✓' : '-'}</td>
         <td>
-          <button class="btn btn-ghost btn-sm" onclick="App.editProduct('${p.id}')">Edit</button>
-          <button class="btn btn-danger btn-sm" onclick="App.deleteProduct('${p.id}')">Hapus</button>
+          <button class="btn btn-ghost btn-sm" onclick="App.editProduct('${p.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="App.deleteProduct('${p.id}')"><i class="fa-solid fa-trash"></i> Hapus</button>
         </td>
       </tr>
     `).join('');
@@ -530,7 +529,7 @@ const App = {
           <td style="font-size:0.75rem">${v.activeDevice || '-'}</td>
           <td>${v.lastLogin ? new Date(v.lastLogin).toLocaleString('id') : '-'}</td>
           <td>
-            <button class="btn btn-danger btn-sm" onclick="App.disableKey('${this.esc(k)}')">Disable</button>
+            <button class="btn btn-danger btn-sm" onclick="App.disableKey('${this.esc(k)}')"><i class="fa-solid fa-ban"></i> Disable</button>
           </td>
         </tr>
       `).join('');
@@ -564,15 +563,15 @@ const App = {
       const el = document.getElementById('userPurchases');
       const data = snap.val();
       if (!data) {
-        el.innerHTML = '<div class="empty-icon">📭</div>Belum ada pembelian';
+        el.innerHTML = '<i class="fa-solid fa-inbox"></i> Belum ada pembelian';
         return;
       }
       const list = Object.values(data);
       el.innerHTML = list.map(p => `
-        <div style="text-align:left;padding:12px;margin-bottom:8px;background:rgba(0,0,0,0.25);border-radius:10px">
+        <div style="text-align:left;padding:14px;margin-bottom:10px;background:rgba(0,0,0,0.28);border-radius:12px;border:1px solid rgba(255,50,70,0.1)">
           <strong>${this.esc(p.productName)}</strong><br>
           <span style="font-size:0.85rem;color:var(--muted)">Rp ${this.fmt(p.price)}</span><br>
-          ${p.downloadLink ? `<a href="${this.esc(p.downloadLink)}" target="_blank" style="color:var(--success);font-size:0.85rem">📥 Download</a>` : ''}
+          ${p.downloadLink ? `<a href="${this.esc(p.downloadLink)}" target="_blank" style="color:var(--success);font-size:0.85rem;display:inline-flex;align-items:center;gap:6px;margin-top:6px"><i class="fa-solid fa-download"></i> Download</a>` : ''}
         </div>
       `).join('');
     });
@@ -596,9 +595,10 @@ const App = {
     const c = document.getElementById('toastContainer');
     const t = document.createElement('div');
     t.className = 'toast ' + (type === 'success' ? 'success' : type === 'error' ? 'error' : '');
-    t.textContent = msg;
+    const icon = type === 'success' ? 'fa-circle-check' : type === 'error' ? 'fa-circle-exclamation' : 'fa-circle-info';
+    t.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${msg}</span>`;
     c.appendChild(t);
-    setTimeout(() => t.remove(), 4000);
+    setTimeout(() => t.remove(), 4200);
   }
 };
 
