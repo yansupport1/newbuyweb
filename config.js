@@ -9,7 +9,7 @@ const CONFIG = {
   qrPaymentUrl: "https://files.catbox.moe/example-qr.png", // <-- GANTI INI
 
   // Default video box di Dashboard (link Catbox atau direct video)
-  dashboardVideoUrl: "https://files.catbox.moe/example-video.mp4", // <-- GANTI INI
+  dashboardVideoUrl: "https://files.catbox.moe/mxm0hs.mp4", // <-- GANTI INI
 
   // Favicon (emoji)
   faviconEmoji: "⚡",
