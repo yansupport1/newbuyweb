@@ -13,26 +13,44 @@ const App = {
   init: function () {
     var self = this;
     try {
+      // Pastikan home selalu terlihat dulu
+      var home = document.getElementById("view-home");
+      if (home) home.classList.add("active");
+
       this.userId = getOrCreateUserId();
-      saveUserToFirebase(this.userId);
+      try { saveUserToFirebase(this.userId); } catch (e1) { console.warn(e1); }
+
       var uidEl = document.getElementById("userIdDisplay");
       if (uidEl) uidEl.textContent = this.userId;
       var yearEl = document.getElementById("year");
       if (yearEl) yearEl.textContent = new Date().getFullYear();
 
       this.setupDashboardVideo();
-      this.listenGlobalStatus();
-      this.listenProducts();
-      this.checkPendingPayment();
       this.startRunningTime();
+
+      try { this.listenGlobalStatus(); } catch (e2) { console.warn(e2); }
+      try { this.listenProducts(); } catch (e3) {
+        console.warn(e3);
+        this.renderProducts();
+      }
+      try { this.checkPendingPayment(); } catch (e4) { console.warn(e4); }
 
       var hash = (location.hash || "").replace("#", "");
       if (hash && document.getElementById("view-" + hash)) {
         this.showView(hash);
+      } else {
+        this.showView("home");
       }
     } catch (e) {
       console.error("Init error:", e);
-      this.toast("Error init: " + e.message, "error");
+      try { this.toast("Error init: " + e.message, "error"); } catch (x) {}
+      // Paksa tampilkan home meski error
+      var h = document.getElementById("view-home");
+      if (h) {
+        document.querySelectorAll(".view").forEach(function (v) { v.classList.remove("active"); });
+        h.classList.add("active");
+      }
+      this.setupDashboardVideo();
     }
   },
 

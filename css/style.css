@@ -1319,3 +1319,121 @@ tr:hover td {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 40, 60, 0.4);
 }
+
+/* ========== RESPONSIVE FINAL ========== */
+@media (max-width: 900px) {
+  .container { padding: 0 14px; }
+  .hero { padding: 36px 0 24px; }
+  .hero h1 { font-size: 1.85rem; }
+  .products-grid {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .admin-layout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding-top: 16px;
+  }
+  .admin-sidebar {
+    position: static;
+    padding: 14px 10px;
+  }
+  .admin-menu {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .admin-menu-btn {
+    width: auto;
+    flex: 1 1 calc(50% - 6px);
+    min-width: 120px;
+    justify-content: center;
+    padding: 12px 10px;
+    font-size: 0.82rem;
+  }
+  .admin-menu-btn.active { box-shadow: none; }
+  .table-wrap { font-size: 0.8rem; }
+  th, td { padding: 10px 8px; }
+}
+
+@media (max-width: 640px) {
+  .header { padding: 10px 0; }
+  .header-inner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .logo { justify-content: center; }
+  .nav {
+    justify-content: center;
+    width: 100%;
+    gap: 4px;
+  }
+  .nav-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 10px 8px;
+    font-size: 0.78rem;
+  }
+  .nav-btn span { display: inline !important; }
+  .status-badge {
+    width: 100%;
+    justify-content: center;
+    margin-top: 4px;
+  }
+  .hero h1 { font-size: 1.55rem; }
+  .hero p { font-size: 0.92rem; }
+  .video-box {
+    border-radius: 14px;
+    margin-bottom: 28px;
+  }
+  .products-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding-bottom: 40px;
+  }
+  .product-body { padding: 14px; }
+  .btn {
+    min-height: 48px;
+    padding: 0 18px;
+    font-size: 0.9rem;
+  }
+  .btn-sm {
+    min-height: 36px;
+    padding: 0 12px;
+  }
+  .payment-wrap,
+  .admin-login-card,
+  .profile-card {
+    margin: 16px auto;
+    padding: 22px 16px;
+    border-radius: 16px;
+  }
+  .qr-box img { width: 180px; height: 180px; }
+  .order-info { font-size: 0.82rem; }
+  .admin-login-icon {
+    width: 60px;
+    height: 60px;
+  }
+  .admin-login-icon i { font-size: 1.4rem; }
+  .footer { padding: 24px 12px; font-size: 0.8rem; }
+  .toast-container {
+    left: 12px;
+    right: 12px;
+    bottom: 16px;
+  }
+  .toast { max-width: 100%; }
+}
+
+@media (max-width: 380px) {
+  .nav-btn span { font-size: 0.72rem; }
+  .logo { font-size: 1.1rem; }
+  .logo-mark { width: 32px; height: 32px; }
+}
+
+/* Pastikan view active selalu terlihat */
+.view.active {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}

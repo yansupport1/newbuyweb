@@ -30,9 +30,19 @@ try {
 
 function ensureDb() {
   if (!firebaseReady || !db) {
+    console.error("Firebase belum siap. Cek databaseURL di js/firebase.js dan Rules di Console.");
     throw new Error("Firebase belum siap. Cek databaseURL & Rules.");
   }
   return db;
+}
+
+// Helper aman untuk read tanpa crash UI
+function safeRef(path) {
+  try {
+    return ensureDb().ref(path);
+  } catch (e) {
+    return null;
+  }
 }
 
 function generateUserId() {
