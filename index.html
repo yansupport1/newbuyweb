@@ -111,17 +111,36 @@
         <div class="qr-box" id="qrBox">
           <img id="qrImg" src="" alt="QR Payment" />
         </div>
-        <p style="font-size:0.84rem;color:var(--muted);margin-bottom:18px">Scan QR di atas untuk transfer</p>
+        <div class="qr-actions">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="App.downloadQr()">
+            <i class="fa-solid fa-download"></i> Download QR
+          </button>
+        </div>
+        <div class="qr-timer" id="qrTimer">QR berlaku 15:00</div>
+        <p style="font-size:0.84rem;color:var(--muted);margin-bottom:14px">Scan QR di atas untuk transfer</p>
 
         <div class="form-group">
-          <label>Link Bukti Transfer</label>
-          <input type="text" id="buktiTfUrl" placeholder="https://... (Catbox / Imgur / dll)" />
+          <label>Upload Bukti Transfer</label>
+          <div class="dropzone" id="buktiDropzone">
+            <input type="file" id="buktiFileInput" accept="image/jpeg,image/png,image/jpg,image/webp,image/gif" hidden />
+            <div class="dropzone-inner" id="buktiDropInner">
+              <i class="fa-solid fa-cloud-arrow-up"></i>
+              <p>Drop foto di sini atau klik untuk pilih</p>
+              <span>JPG, PNG, JPEG, WEBP (max 3MB)</span>
+            </div>
+            <div class="dropzone-preview" id="buktiPreview" style="display:none">
+              <img id="buktiPreviewImg" alt="Preview" />
+              <button type="button" class="btn btn-ghost btn-sm" id="buktiClearBtn">
+                <i class="fa-solid fa-xmark"></i> Ganti
+              </button>
+            </div>
+          </div>
         </div>
-        <button class="btn btn-primary btn-block" onclick="App.submitBuktiTf()">
+        <button class="btn btn-primary btn-block" id="btnSubmitBukti" onclick="App.submitBuktiTf()" disabled>
           <i class="fa-solid fa-paper-plane"></i> Kirim Bukti TF
         </button>
         <p style="margin-top:16px;font-size:0.78rem;color:var(--muted)">
-          Halaman ini tersimpan. Jangan ditutup sampai status berubah.
+          Halaman tersimpan. Jangan ditutup sampai status berubah.
         </p>
         <div id="paymentStatus" class="mt-2"></div>
       </div>
@@ -337,6 +356,14 @@
 
   <div class="toast-container" id="toastContainer"></div>
 
+  <div class="lightbox" id="lightbox" onclick="App.closeLightbox(event)">
+    <button type="button" class="lightbox-close" onclick="App.closeLightbox(event)" aria-label="Tutup">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+    <img id="lightboxImg" src="" alt="Bukti TF" />
+  </div>
+
+  <script src="js/env.js"></script>
   <script src="config.js"></script>
   <script src="js/firebase.js"></script>
   <script src="js/security.js"></script>

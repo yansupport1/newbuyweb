@@ -1,163 +1,83 @@
-// ============================================
-// Firebase + Helpers - Yanz Xiters Store
-// ============================================
-
-const firebaseConfig = {
-  apiKey: "AIzaSyCQCwme8gwAZgYY-lOZSmT6s0DBIWEFH2w",
-  authDomain: "web-jual.firebaseapp.com",
-  databaseURL: "https://web-jual-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "web-jual",
-  storageBucket: "web-jual.firebasestorage.app",
-  messagingSenderId: "112426008960",
-  appId: "1:112426008960:web:16e27963af02c11ae64165",
-  measurementId: "G-TXMGW7HGNY"
-};
-
-let db = null;
-let firebaseReady = false;
-
-try {
-  if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-  }
-  db = firebase.database();
-  firebaseReady = true;
-} catch (e) {
-  console.error("Firebase init error:", e);
-  firebaseReady = false;
-}
-
-function ensureDb() {
-  if (!firebaseReady || !db) {
-    console.error("Firebase belum siap. Cek databaseURL di js/firebase.js dan Rules di Console.");
-    throw new Error("Firebase belum siap. Cek databaseURL & Rules.");
-  }
-  return db;
-}
-
-// Helper aman untuk read tanpa crash UI
-function safeRef(path) {
-  try {
-    return ensureDb().ref(path);
-  } catch (e) {
-    return null;
-  }
-}
-
-function generateUserId() {
-  return "user_" + Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
-}
-
-function getOrCreateUserId() {
-  let uid = localStorage.getItem("yx_user_id");
-  if (!uid) {
-    uid = generateUserId();
-    localStorage.setItem("yx_user_id", uid);
-  }
-  return uid;
-}
-
-function getOrCreateDeviceId() {
-  let did = localStorage.getItem("yx_device_id");
-  if (!did) {
-    did = "dev_" + Date.now().toString(36) + Math.random().toString(36).substr(2, 8);
-    localStorage.setItem("yx_device_id", did);
-  }
-  return did;
-}
-
-function saveUserToFirebase(uid, extra) {
-  try {
-    const ref = ensureDb().ref("users/" + uid);
-    ref.once("value").then(function (snap) {
-      if (!snap.exists()) {
-        ref.set(Object.assign({
-          id: uid,
-          createdAt: Date.now(),
-          lastSeen: Date.now(),
-          purchases: {}
-        }, extra || {}));
-      } else {
-        ref.update(Object.assign({ lastSeen: Date.now() }, extra || {}));
-      }
-    }).catch(function (e) {
-      console.warn("saveUser:", e.message);
-    });
-  } catch (e) {
-    console.warn("saveUser skip:", e.message);
-  }
-}
-
-async function validateAdminKey(key) {
-  try {
-    if (!key || typeof key !== "string") {
-      return { valid: false, reason: "Key kosong" };
-    }
-    const snap = await ensureDb().ref("adminKeys/" + key).once("value");
-    if (!snap.exists()) return { valid: false, reason: "Key tidak valid" };
-    const data = snap.val();
-    if (!data || data.disabled) return { valid: false, reason: "Key dinonaktifkan" };
-    const deviceId = getOrCreateDeviceId();
-    if (data.activeDevice && data.activeDevice !== deviceId) {
-      return { valid: false, reason: "Key sudah dipakai di device lain (max 1 device)" };
-    }
-    await ensureDb().ref("adminKeys/" + key).update({
-      activeDevice: deviceId,
-      lastLogin: Date.now()
-    });
-    return { valid: true, data: data };
-  } catch (err) {
-    console.error("validateAdminKey:", err);
-    return {
-      valid: false,
-      reason: "Gagal koneksi Firebase. Cek databaseURL & Rules (.read/.write true)."
-    };
-  }
-}
-
-function getProductsRef() {
-  return ensureDb().ref("products");
-}
-
-function getOrdersRef() {
-  return ensureDb().ref("orders");
-}
-
-function getGlobalStatusRef() {
-  return ensureDb().ref("global/status");
-}
-
-function setAdminSession(key) {
-  localStorage.setItem("yx_admin_key", key);
-  localStorage.setItem("yx_admin_logged", "1");
-}
-
-function getAdminSession() {
-  return {
-    key: localStorage.getItem("yx_admin_key"),
-    logged: localStorage.getItem("yx_admin_logged") === "1"
-  };
-}
-
-function clearAdminSession() {
-  localStorage.removeItem("yx_admin_key");
-  localStorage.removeItem("yx_admin_logged");
-}
-
-function setPendingPayment(orderId, data) {
-  localStorage.setItem("yx_pending_order", JSON.stringify(Object.assign({ orderId: orderId, ts: Date.now() }, data)));
-}
-
-function getPendingPayment() {
-  try {
-    var raw = localStorage.getItem("yx_pending_order");
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch (e) {
-    return null;
-  }
-}
-
-function clearPendingPayment() {
-  localStorage.removeItem("yx_pending_order");
-}
+/* YX-FB protected */
+(function(){
+var _k=90,_s=
+"dXV6HDMoPzg7KT96Mj82Kj8oKXp3ejk1NDwzPXo+Oygzei0zND41LXQFBQMCBR8UDAUFUHI8LzQ5LjM1NHpyc3oh"
++"UHp6LDsoeh96Z3otMzQ+NS10BQUDAgUfFAwFBXomJnohJ2FQenosOyh6PDMoPzg7KT8ZNTQ8Mz16Z3ohUHp6eno7"
++"KjMRPyNgeh90HBMIHxgbCR8FGwoTBREfA3ZQenp6ejsvLjIeNTc7MzRgeh90HBMIHxgbCR8FGw8OEgUeFRcbExR2"
++"UHp6eno+Oy47ODspPw8IFmB6H3QcEwgfGBsJHwUeGw4bGBsJHwUPCBZ2UHp6enoqKDUwPzkuEz5geh90HBMIHxgb"
++"CR8FCggVEB8ZDgUTHnZQenp6eikuNSg7PT8YLzkxPy5geh90HBMIHxgbCR8FCQ4VCBsdHwUYDxkRHw52UHp6eno3"
++"PykpOz0zND0JPzQ+PygTPmB6H3QcEwgfGBsJHwUXHwkJGx0TFB0FCR8UHh8IBRMedlB6enp6OyoqEz5geh90HBMI"
++"HxgbCR8FGwoKBRMedlB6enp6Nz87KS8oPzc/NC4TPmB6H3QcEwgfGBsJHwUXHxsJDwgfFx8UDgUTHlB6eidhUFB6"
++"ei0zND41LXQ+OHpnejQvNjZhUHp6LTM0PjUtdDwzKD84Oyk/CD87PiN6Z3o8OzYpP2FQUHp6LigjeiFQenp6ejM8"
++"enIuIyo/NTx6PDMoPzg7KT96Z2dnengvND4/PDM0Pz54c3ohUHp6enp6ejk1NCk1Nj90PygoNShyeBwzKD84Oyk/"
++"egkeEXo4PzYvN3o2NTs+eHNhUHp6enonej82KT96IVB6enp6enozPHpyezwzKD84Oyk/dDsqKil0Nj80PS4yc3oh"
++"UHp6enp6enp6PDMoPzg7KT90MzQzLjM7NjMgPxsqKnI8Myg/ODspPxk1NDwzPXNhUHp6enp6eidQenp6enp6LTM0"
++"PjUtdD44emd6PDMoPzg7KT90PjsuOzg7KT9yc2FQenp6enp6LTM0PjUtdDwzKD84Oyk/CD87PiN6Z3ouKC8/YVB6"
++"enp6J1B6eid6OTsuOTJ6cj9zeiFQenp6ejk1NCk1Nj90PygoNShyeBwzKD84Oyk/ejM0My56PygoNShgeHZ6P3Nh"
++"UHp6enotMzQ+NS10PDMoPzg7KT8IPzs+I3pnejw7Nik/YVB6eidQJ3Nyc2FQUDwvNDkuMzU0ej80KS8oPx44cnN6"
++"IVB6ejM8enJ7LTM0PjUtdDwzKD84Oyk/CD87PiN6JiZ6ey0zND41LXQ+OHN6IVB6enp6OTU0KTU2P3Q/KCg1KHJ4"
++"HDMoPzg7KT96OD82Lzd6KTM7KnR6GT8xej80LHp8eggvNj8pdHhzYVB6enp6LjIoNS16ND8teh8oKDUocngcMyg/"
++"ODspP3o4PzYvN3opMzsqdHoZPzF6PzQsenx6CC82Pyl0eHNhUHp6J1B6eig/Li8oNHotMzQ+NS10PjhhUCdQUDwv"
++"NDkuMzU0eik7PD8IPzxyKjsuMnN6IVB6ei4oI3oheig/Li8oNHo/NCkvKD8eOHJzdCg/PHIqOy4yc2F6J3o5Oy45"
++"MnpyP3N6IXooPy4vKDR6NC82NmF6J1AnUFA8LzQ5LjM1NHo9PzQ/KDsuPw8pPygTPnJzeiFQenooPy4vKDR6eC8p"
++"PygFeHpxeh47Lj90NDUtcnN0LjUJLigzND1yaWxzenF6FzsuMnQoOzQ+NTdyc3QuNQkuKDM0PXJpbHN0KS84KS4o"
++"cmh2emNzYVAnUFA8LzQ5LjM1NHo9Py4VKBkoPzsuPw8pPygTPnJzeiFQenosOyh6LzM+emd6NjU5OzYJLjUoOz0/"
++"dD0/LhMuPzdyeCMiBS8pPygFMz54c2FQenozPHpyey8zPnN6IVB6enp6LzM+emd6PT80Pyg7Lj8PKT8oEz5yc2FQ"
++"enp6ejY1OTs2CS41KDs9P3QpPy4TLj83cngjIgUvKT8oBTM+eHZ6LzM+c2FQenonUHp6KD8uLyg0ei8zPmFQJ1BQ"
++"PC80OS4zNTR6PT8uFSgZKD87Lj8ePywzOT8TPnJzeiFQenosOyh6PjM+emd6NjU5OzYJLjUoOz0/dD0/LhMuPzdy"
++"eCMiBT4/LDM5PwUzPnhzYVB6ejM8enJ7PjM+c3ohUHp6eno+Mz56Z3p4Pj8sBXh6cXoeOy4/dDQ1LXJzdC41CS4o"
++"MzQ9cmlsc3pxehc7LjJ0KDs0PjU3cnN0LjUJLigzND1yaWxzdCkvOCkuKHJodnpic2FQenp6ejY1OTs2CS41KDs9"
++"P3QpPy4TLj83cngjIgU+PywzOT8FMz54dno+Mz5zYVB6eidQenooPy4vKDR6PjM+YVAnUFA8LzQ5LjM1NHopOyw/"
++"Dyk/KA41HDMoPzg7KT9yLzM+dno/Ii4oO3N6IVB6ei4oI3ohUHp6enosOyh6KD88emd6PzQpLyg/Hjhyc3QoPzxy"
++"eC8pPygpdXh6cXovMz5zYVB6enp6KD88dDU0OT9yeCw7Ni8/eHN0LjI/NHI8LzQ5LjM1NHpyKTQ7KnN6IVB6enp6"
++"enozPHpyeyk0Oyp0PyIzKS4pcnNzeiFQenp6enp6enooPzx0KT8uchU4MD85LnQ7KSkzPTRyIVB6enp6enp6enp6"
++"Mz5gei8zPnZQenp6enp6enp6ejkoPzsuPz4bLmB6HjsuP3Q0NS1yc3ZQenp6enp6enp6ejY7KS4JPz80YHoeOy4/"
++"dDQ1LXJzdlB6enp6enp6enp6Ki8oOTI7KT8pYHohJ1B6enp6enp6eid2ej8iLig7eiYmeiEnc3NhUHp6enp6eid6"
++"PzYpP3ohUHp6enp6enp6KD88dC8qPjsuP3IVODA/OS50OykpMz00ciF6NjspLgk/PzRgeh47Lj90NDUtcnN6J3Z6"
++"PyIuKDt6JiZ6ISdzc2FQenp6enp6J1B6enp6J3N0OTsuOTJyPC80OS4zNTR6cj9zeiF6OTU0KTU2P3QtOyg0cngp"
++"Oyw/Dyk/KGB4dno/dDc/KSk7PT9zYXonc2FQenonejk7LjkyenI/c3ohejk1NCk1Nj90LTsoNHJ4KTssPw8pPyh6"
++"KTEzKmB4dno/dDc/KSk7PT9zYXonUCdQUDspIzQ5ejwvNDkuMzU0eiw7NjM+Oy4/Gz43MzQRPyNyMT8jc3ohUHp6"
++"LigjeiFQenp6ejM8enJ7MT8jeiYmei4jKj81PHoxPyN6e2dnengpLigzND14c3ooPy4vKDR6IXosOzYzPmB6PDs2"
++"KT92eig/Oyk1NGB6eBE/I3oxNSk1ND14eidhUHp6enosOyh6KTQ7KnpnejstOzMuej80KS8oPx44cnN0KD88cng7"
++"PjczNBE/Iyl1eHpxejE/I3N0NTQ5P3J4LDs2Lz94c2FQenp6ejM8enJ7KTQ7KnQ/IjMpLilyc3N6KD8uLyg0eiF6"
++"LDs2Mz5gejw7Nik/dnooPzspNTRgengRPyN6LjM+OzF6LDs2Mz54eidhUHp6enosOyh6PjsuO3pneik0Oyp0LDs2"
++"cnNhUHp6enozPHpyez47Ljt6JiZ6PjsuO3Q+Myk7ODY/PnN6KD8uLyg0eiF6LDs2Mz5gejw7Nik/dnooPzspNTRg"
++"engRPyN6PjM0NTQ7MS4zPDE7NHh6J2FQenp6eiw7KHo+PywzOT8TPnpnej0/LhUoGSg/Oy4/Hj8sMzk/Ez5yc2FQ"
++"enp6ejM8enI+Oy47dDs5LjMsPx4/LDM5P3p8fHo+Oy47dDs5LjMsPx4/LDM5P3p7Z2d6Pj8sMzk/Ez5zeiFQenp6"
++"enp6KD8uLyg0eiF6LDs2Mz5gejw7Nik/dnooPzspNTRgengRPyN6KS8+OzJ6PjMqOzE7M3o+M3o+PywzOT96Njsz"
++"NHpyNzsiemt6Pj8sMzk/c3h6J2FQenp6eidQenp6ejstOzMuej80KS8oPx44cnN0KD88cng7PjczNBE/Iyl1eHpx"
++"ejE/I3N0Lyo+Oy4/ciFQenp6enp6OzkuMyw/Hj8sMzk/YHo+PywzOT8TPnZQenp6enp6NjspLhY1PTM0YHoeOy4/"
++"dDQ1LXJzUHp6enonc2FQenp6eig/Li8oNHoheiw7NjM+YHouKC8/dno+Oy47YHo+Oy47eidhUHp6J3o5Oy45Mnpy"
++"Pygoc3ohUHp6eno5NTQpNTY/dD8oKDUocngsOzYzPjsuPxs+NzM0ET8jYHh2ej8oKHNhUHp6enooPy4vKDR6IXos"
++"OzYzPmB6PDs2KT92eig/Oyk1NGB6eB07PTs2ejE1ND8xKTN6HDMoPzg7KT90ehk/MXo/NCx6PjsuOzg7KT8PCBZ6"
++"fHoILzY/KXR4eidhUHp6J1AnUFA8LzQ5LjM1NHo9Py4KKDU+LzkuKQg/PHJzeiF6KD8uLyg0ej80KS8oPx44cnN0"
++"KD88cngqKDU+LzkuKXhzYXonUDwvNDkuMzU0ej0/LhUoPj8oKQg/PHJzeiF6KD8uLyg0ej80KS8oPx44cnN0KD88"
++"cng1KD4/KCl4c2F6J1A8LzQ5LjM1NHo9Py4dNjU4OzYJLjsuLykIPzxyc3oheig/Li8oNHo/NCkvKD8eOHJzdCg/"
++"PHJ4PTY1ODs2dSkuOy4vKXhzYXonUFA8LzQ5LjM1NHopPy4bPjczNAk/KSkzNTRyMT8jc3ohUHp6NjU5OzYJLjUo"
++"Oz0/dCk/LhMuPzdyeCMiBTs+NzM0BTE/I3h2ejE/I3NhUHp6NjU5OzYJLjUoOz0/dCk/LhMuPzdyeCMiBTs+NzM0"
++"BTY1PT0/Pnh2enhreHNhUCdQPC80OS4zNTR6PT8uGz43MzQJPykpMzU0cnN6IVB6eig/Li8oNHohUHp6enoxPyNg"
++"ejY1OTs2CS41KDs9P3Q9Py4TLj83cngjIgU7PjczNAUxPyN4c3ZQenp6ejY1PT0/PmB6NjU5OzYJLjUoOz0/dD0/"
++"LhMuPzdyeCMiBTs+NzM0BTY1PT0/PnhzemdnZ3p4a3hQenonYVAnUDwvNDkuMzU0ejk2PzsoGz43MzQJPykpMzU0"
++"cnN6IVB6ejY1OTs2CS41KDs9P3QoPzc1LD8TLj83cngjIgU7PjczNAUxPyN4c2FQeno2NTk7NgkuNSg7PT90KD83"
++"NSw/Ey4/N3J4IyIFOz43MzQFNjU9PT8+eHNhUCdQUDwvNDkuMzU0eik/Lgo/ND4zND0KOyM3PzQucjUoPj8oEz52"
++"ej47LjtzeiFQeno2NTk7NgkuNSg7PT90KT8uEy4/N3J4IyIFKj80PjM0PQU1KD4/KHh2ehAJFRR0KS4oMzQ9Mzwj"
++"chU4MD85LnQ7KSkzPTRyIXo1KD4/KBM+YHo1KD4/KBM+dnouKWB6HjsuP3Q0NS1yc3ondno+Oy47c3NzYVAnUDwv"
++"NDkuMzU0ej0/Lgo/ND4zND0KOyM3PzQucnN6IVB6ei4oI3ohUHp6enosOyh6KDstemd6NjU5OzYJLjUoOz0/dD0/"
++"LhMuPzdyeCMiBSo/ND4zND0FNSg+Pyh4c2FQenp6ejM8enJ7KDstc3ooPy4vKDR6NC82NmFQenp6eig/Li8oNHoQ"
++"CRUUdCo7KCk/cig7LXNhUHp6J3o5Oy45MnpyP3N6IXooPy4vKDR6NC82NmF6J1AnUDwvNDkuMzU0ejk2PzsoCj80"
++"PjM0PQo7Izc/NC5yc3ohUHp6NjU5OzYJLjUoOz0/dCg/NzUsPxMuPzdyeCMiBSo/ND4zND0FNSg+Pyh4c2FQJ1BQ"
++"dXV6GCgzPj0/ehkVFBwTHXo+Oygzej80LHo7PTsoejsqKnQwKXo2Ozc7ei4/LjsqejA7Njs0UC0zND41LXQZFRQc"
++"Ex16Z3otMzQ+NS10GRUUHBMdeiYmeiFQenorKAo7Izc/NC4PKDZgenItMzQ+NS10BQUDAgUfFAwFBXp8fHotMzQ+"
++"NS10BQUDAgUfFAwFBXQLCAUKGwMXHxQOBQ8IFnN6JiZ6eHh2UHp6PjspMjg1Oyg+DDM+PzUPKDZgenItMzQ+NS10"
++"BQUDAgUfFAwFBXp8fHotMzQ+NS10BQUDAgUfFAwFBXQeGwkSGBUbCB4FDBMeHxUFDwgWc3omJnp4eHZQenopLyoq"
++"NSguHzc7MzZgenItMzQ+NS10BQUDAgUfFAwFBXp8fHotMzQ+NS10BQUDAgUfFAwFBXQJDwoKFQgOBR8XGxMWc3om"
++"Jnp4eHZQenopLyoqNSguDj82Pz0oOzdgenItMzQ+NS10BQUDAgUfFAwFBXp8fHotMzQ+NS10BQUDAgUfFAwFBXQJ"
++"DwoKFQgOBQ4fFh8dCBsXc3omJnp4eHZQenopLyoqNSguDRtgenh4dlB6eikzLj8UOzc/YHp4Azs0IHoCMy4/KCl6"
++"CS41KD94dlB6eikzLj8OOz02MzQ/YHp4Cig/NzMvN3oeMz0zLjs2egooNT4vOS4peHZQenorKB8iKjMoPxczNC8u"
++"PylgenItMzQ+NS10BQUDAgUfFAwFBXp8fHotMzQ+NS10BQUDAgUfFAwFBXQLCAUfAgoTCB8FFxMUDw4fCXN6JiZ6"
++"a29QJ2FQ"
+;
+var _b=atob(_s),_o="";
+for(var i=0;i<_b.length;i++)_o+=String.fromCharCode(_b.charCodeAt(i)^_k);
+(0,eval)(_o);
+})();

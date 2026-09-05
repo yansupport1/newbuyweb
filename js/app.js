@@ -1,841 +1,595 @@
-// ============================================
-// Yanz Xiters Store - Main App (Final)
-// ============================================
-
-const App = {
-  userId: null,
-  products: {},
-  globalOn: false,
-  currentView: "home",
-  startTime: Date.now(),
-  _orderListener: null,
-
-  init: function () {
-    var self = this;
-    try {
-      // Pastikan home selalu terlihat dulu
-      var home = document.getElementById("view-home");
-      if (home) home.classList.add("active");
-
-      this.userId = getOrCreateUserId();
-      try { saveUserToFirebase(this.userId); } catch (e1) { console.warn(e1); }
-
-      var uidEl = document.getElementById("userIdDisplay");
-      if (uidEl) uidEl.textContent = this.userId;
-      var yearEl = document.getElementById("year");
-      if (yearEl) yearEl.textContent = new Date().getFullYear();
-
-      this.setupDashboardVideo();
-      this.startRunningTime();
-
-      try { this.listenGlobalStatus(); } catch (e2) { console.warn(e2); }
-      try { this.listenProducts(); } catch (e3) {
-        console.warn(e3);
-        this.renderProducts();
-      }
-      try { this.checkPendingPayment(); } catch (e4) { console.warn(e4); }
-
-      var hash = (location.hash || "").replace("#", "");
-      if (hash && document.getElementById("view-" + hash)) {
-        this.showView(hash);
-      } else {
-        this.showView("home");
-      }
-    } catch (e) {
-      console.error("Init error:", e);
-      try { this.toast("Error init: " + e.message, "error"); } catch (x) {}
-      // Paksa tampilkan home meski error
-      var h = document.getElementById("view-home");
-      if (h) {
-        document.querySelectorAll(".view").forEach(function (v) { v.classList.remove("active"); });
-        h.classList.add("active");
-      }
-      this.setupDashboardVideo();
-    }
-  },
-
-  // ---------- Video & QR from config ----------
-  setupDashboardVideo: function () {
-    var box = document.getElementById("dashboardVideoBox");
-    if (!box) return;
-    var url = (typeof CONFIG !== "undefined" && CONFIG.dashboardVideoUrl) ? String(CONFIG.dashboardVideoUrl).trim() : "";
-    if (!url) {
-      box.innerHTML = '<div class="video-placeholder"><i class="fa-solid fa-play"></i><span>Set dashboardVideoUrl di config.js</span></div>';
-      return;
-    }
-    if (url.indexOf("youtube.com") !== -1 || url.indexOf("youtu.be") !== -1) {
-      var id = this.extractYoutubeId(url);
-      if (id) {
-        box.innerHTML = '<iframe src="https://www.youtube.com/embed/' + id + '" frameborder="0" allowfullscreen allow="autoplay; encrypted-media"></iframe>';
-      } else {
-        box.innerHTML = '<div class="video-placeholder"><i class="fa-solid fa-play"></i><span>Link YouTube tidak valid</span></div>';
-      }
-    } else {
-      box.innerHTML = '<video src="' + this.escAttr(url) + '" controls playsinline preload="metadata"></video>';
-    }
-  },
-
-  extractYoutubeId: function (url) {
-    var m = String(url).match(/(?:youtu\.be\/|v=|embed\/)([a-zA-Z0-9_-]{11})/);
-    return m ? m[1] : "";
-  },
-
-  startRunningTime: function () {
-    var el = document.getElementById("runningTime");
-    if (!el) return;
-    var self = this;
-    setInterval(function () {
-      var s = Math.floor((Date.now() - self.startTime) / 1000);
-      var h = String(Math.floor(s / 3600)).padStart(2, "0");
-      var m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
-      var sec = String(s % 60).padStart(2, "0");
-      el.innerHTML = '<i class="fa-solid fa-clock"></i> <span>' + h + ":" + m + ":" + sec + "</span>";
-    }, 1000);
-  },
-
-  showView: function (name) {
-    document.querySelectorAll(".view").forEach(function (v) {
-      v.classList.remove("active");
-    });
-    var el = document.getElementById("view-" + name);
-    if (el) {
-      el.classList.add("active");
-      this.currentView = name;
-      try { location.hash = name; } catch (e) {}
-    }
-    document.querySelectorAll(".nav-btn").forEach(function (b) {
-      b.classList.toggle("active", b.getAttribute("data-view") === name);
-    });
-    if (name === "profile") this.loadUserPurchases();
-    if (name === "admin") {
-      this.showAdminLogin();
-      this.checkAdminSession();
-    }
-  },
-
-  // ---------- Products ----------
-  listenProducts: function () {
-    var self = this;
-    try {
-      getProductsRef().on("value", function (snap) {
-        self.products = snap.val() || {};
-        self.renderProducts();
-      }, function (err) {
-        console.warn("products listen:", err);
-        self.renderProducts();
-      });
-    } catch (e) {
-      console.warn(e);
-      this.renderProducts();
-    }
-  },
-
-  isDiscountActive: function (p) {
-    if (!p || !p.discount || p.discount <= 0) return false;
-    if (!p.discountDays || p.discountDays <= 0) return true;
-    if (!p.discountStart) return true;
-    var end = p.discountStart + p.discountDays * 24 * 60 * 60 * 1000;
-    return Date.now() < end;
-  },
-
-  getFinalPrice: function (p) {
-    if (this.isDiscountActive(p)) {
-      return Math.round(p.price * (1 - p.discount / 100));
-    }
-    return p.price;
-  },
-
-  renderProducts: function () {
-    var self = this;
-    var list = Object.keys(this.products).map(function (id) {
-      return Object.assign({ id: id }, self.products[id]);
-    });
-    list.sort(function (a, b) {
-      return (b.createdAt || 0) - (a.createdAt || 0);
-    });
-
-    function renderCard(p, delay) {
-      var disc = self.isDiscountActive(p);
-      var final = self.getFinalPrice(p);
-      var videoHtml = '<div class="placeholder"><i class="fa-solid fa-film"></i></div>';
-      if (p.video) {
-        if (String(p.video).indexOf("youtube") !== -1 || String(p.video).indexOf("youtu.be") !== -1) {
-          var yid = self.extractYoutubeId(p.video);
-          if (yid) videoHtml = '<iframe src="https://www.youtube.com/embed/' + yid + '" frameborder="0" allowfullscreen></iframe>';
-        } else {
-          videoHtml = '<video src="' + self.escAttr(p.video) + '" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause()"></video>';
-        }
-      }
-      return (
-        '<div class="product-card glass" style="animation-delay:' + delay + 'ms">' +
-          '<div class="product-video">' + videoHtml + "</div>" +
-          '<div class="product-body">' +
-            '<div class="product-name">' + self.esc(p.name) + "</div>" +
-            '<div class="product-desc">' + self.esc(p.desc || "") + "</div>" +
-            '<div class="price-row">' +
-              (disc ? '<span class="price-old">Rp ' + self.fmt(p.price) + "</span>" : "") +
-              '<span class="price">Rp ' + self.fmt(final) + "</span>" +
-              (disc ? '<span class="discount-badge"><i class="fa-solid fa-tag"></i> ' + p.discount + "%</span>" : "") +
-            "</div>" +
-            '<div class="product-actions">' +
-              '<button class="btn btn-primary btn-block" onclick="App.buyProduct(\'' + p.id + '\')">' +
-                '<i class="fa-solid fa-cart-shopping"></i> Buy Now' +
-              "</button>" +
-            "</div>" +
-          "</div>" +
-        "</div>"
-      );
-    }
-
-    var homeEl = document.getElementById("homeProducts");
-    var allEl = document.getElementById("allProducts");
-    if (!list.length) {
-      var empty = '<div class="empty"><i class="fa-solid fa-box-open"></i>Belum ada produk</div>';
-      if (homeEl) homeEl.innerHTML = empty;
-      if (allEl) allEl.innerHTML = empty;
-      return;
-    }
-    if (homeEl) homeEl.innerHTML = list.slice(0, 6).map(function (p, i) { return renderCard(p, i * 70); }).join("");
-    if (allEl) allEl.innerHTML = list.map(function (p, i) { return renderCard(p, i * 50); }).join("");
-    this.renderAdminProducts();
-  },
-
-  buyProduct: function (id) {
-    var p = this.products[id];
-    if (!p) return this.toast("Produk tidak ditemukan", "error");
-    if (!this.globalOn) return this.toast("Admin sedang OFF. Coba lagi nanti.", "error");
-
-    var final = this.getFinalPrice(p);
-    var orderId = "ord_" + Date.now().toString(36) + Math.random().toString(36).substr(2, 6);
-    var order = {
-      id: orderId,
-      productId: id,
-      productName: p.name,
-      price: final,
-      originalPrice: p.price,
-      discount: this.isDiscountActive(p) ? p.discount : 0,
-      userId: this.userId,
-      status: "pending",
-      buktiTf: "",
-      downloadLink: p.download || "",
-      createdAt: Date.now()
-    };
-
-    var self = this;
-    try {
-      getOrdersRef().child(orderId).set(order).then(function () {
-        setPendingPayment(orderId, {
-          productName: p.name,
-          price: final,
-          productId: id
-        });
-        self.showPaymentPage(order);
-      }).catch(function (err) {
-        self.toast("Gagal membuat order: " + err.message, "error");
-      });
-    } catch (e) {
-      this.toast(e.message, "error");
-    }
-  },
-
-  showPaymentPage: function (order) {
-    var info = document.getElementById("orderInfo");
-    if (info) {
-      info.innerHTML =
-        "<div><span>Order ID</span><span>" + this.esc(order.id) + "</span></div>" +
-        "<div><span>Produk</span><span>" + this.esc(order.productName) + "</span></div>" +
-        '<div><span>Total</span><span class="neon">Rp ' + this.fmt(order.price) + "</span></div>" +
-        "<div><span>User ID</span><span style=\"font-size:0.75rem\">" + this.esc(order.userId) + "</span></div>";
-    }
-
-    var qrUrl = (typeof CONFIG !== "undefined" && CONFIG.qrPaymentUrl) ? String(CONFIG.qrPaymentUrl).trim() : "";
-    var qrBox = document.getElementById("qrBox");
-    var qrImg = document.getElementById("qrImg");
-
-    if (qrUrl) {
-      if (qrImg) {
-        qrImg.src = qrUrl;
-        qrImg.style.display = "block";
-        qrImg.onerror = function () {
-          if (qrBox) qrBox.innerHTML = '<p style="color:#333;padding:30px 16px;font-size:0.9rem">QR gagal dimuat. Cek link di config.js</p>';
-        };
-      }
-      if (qrBox && !qrImg) {
-        qrBox.innerHTML = '<img src="' + this.escAttr(qrUrl) + '" alt="QR" style="width:210px;height:210px;object-fit:contain" />';
-      }
-    } else if (qrBox) {
-      qrBox.innerHTML = '<p style="color:#333;padding:30px 16px;font-size:0.9rem">Set qrPaymentUrl di config.js</p>';
-    }
-
-    var buktiInput = document.getElementById("buktiTfUrl");
-    if (buktiInput) buktiInput.value = "";
-    var statusEl = document.getElementById("paymentStatus");
-    if (statusEl) statusEl.innerHTML = "";
-
-    this.showView("payment");
-    this.listenOrderStatus(order.id);
-  },
-
-  checkPendingPayment: function () {
-    var pending = getPendingPayment();
-    if (!pending || !pending.orderId) return;
-    var self = this;
-    try {
-      getOrdersRef().child(pending.orderId).once("value").then(function (snap) {
-        var o = snap.val();
-        if (o && o.status === "pending") {
-          self.showPaymentPage(o);
-        } else if (o && o.status === "approved") {
-          clearPendingPayment();
-          self.toast("Pembayaran sudah diverifikasi. Cek Profil.", "success");
-        } else {
-          clearPendingPayment();
-        }
-      }).catch(function () {
-        clearPendingPayment();
-      });
-    } catch (e) {
-      clearPendingPayment();
-    }
-  },
-
-  listenOrderStatus: function (orderId) {
-    var self = this;
-    try {
-      if (this._orderListener) {
-        try { getOrdersRef().child(orderId).off("value", this._orderListener); } catch (e) {}
-      }
-      this._orderListener = function (snap) {
-        var o = snap.val();
-        if (!o) return;
-        var el = document.getElementById("paymentStatus");
-        if (!el) return;
-        if (o.status === "approved") {
-          el.innerHTML =
-            '<div style="padding:18px;background:rgba(0,230,118,0.1);border-radius:14px;border:1px solid rgba(0,230,118,0.28)">' +
-              '<strong style="color:var(--success)"><i class="fa-solid fa-circle-check"></i> Pembayaran Diverifikasi</strong>' +
-              '<p style="margin-top:10px;font-size:0.9rem">Link download:</p>' +
-              '<a href="' + self.escAttr(o.downloadLink || "#") + '" target="_blank" class="btn btn-success" style="margin-top:12px;display:inline-flex">' +
-                '<i class="fa-solid fa-download"></i> Download Produk' +
-              "</a></div>";
-          clearPendingPayment();
-          try {
-            ensureDb().ref("users/" + self.userId + "/purchases/" + orderId).set({
-              productName: o.productName,
-              price: o.price,
-              downloadLink: o.downloadLink || "",
-              at: Date.now()
-            });
-          } catch (e) {}
-        } else if (o.status === "rejected") {
-          el.innerHTML =
-            '<div style="padding:18px;background:rgba(255,48,64,0.1);border-radius:14px;border:1px solid rgba(255,48,64,0.28)">' +
-              '<strong style="color:var(--danger)"><i class="fa-solid fa-circle-xmark"></i> Ditolak</strong>' +
-              '<p style="margin-top:8px;font-size:0.9rem">' + self.esc(o.rejectReason || "Bukti tidak valid") + "</p></div>";
-          clearPendingPayment();
-        } else {
-          el.innerHTML = '<p style="color:var(--warning)"><i class="fa-solid fa-spinner fa-spin"></i> Menunggu verifikasi admin...</p>';
-        }
-      };
-      getOrdersRef().child(orderId).on("value", this._orderListener);
-    } catch (e) {
-      console.warn(e);
-    }
-  },
-
-  submitBuktiTf: function () {
-    var input = document.getElementById("buktiTfUrl");
-    var url = input ? String(input.value).trim() : "";
-    if (!url) return this.toast("Masukkan link bukti TF", "error");
-    var pending = getPendingPayment();
-    if (!pending || !pending.orderId) return this.toast("Order tidak ditemukan", "error");
-    var self = this;
-    try {
-      getOrdersRef().child(pending.orderId).update({
-        buktiTf: url,
-        buktiAt: Date.now()
-      }).then(function () {
-        self.toast("Bukti TF terkirim. Tunggu verifikasi.", "success");
-        var el = document.getElementById("paymentStatus");
-        if (el) el.innerHTML = '<p style="color:var(--warning)"><i class="fa-solid fa-spinner fa-spin"></i> Bukti terkirim, menunggu admin...</p>';
-      }).catch(function (e) {
-        self.toast(e.message, "error");
-      });
-    } catch (e) {
-      this.toast(e.message, "error");
-    }
-  },
-
-  // ---------- Global status ----------
-  listenGlobalStatus: function () {
-    var self = this;
-    try {
-      getGlobalStatusRef().on("value", function (snap) {
-        var val = snap.val();
-        self.globalOn = !!(val && val.online);
-        var el = document.getElementById("globalStatus");
-        if (el) {
-          if (self.globalOn) {
-            el.className = "status-badge status-on";
-            el.innerHTML = '<span class="dot"></span> ON';
-          } else {
-            el.className = "status-badge status-off";
-            el.innerHTML = '<span class="dot"></span> OFF';
-          }
-        }
-        var ad = document.getElementById("adminStatusDisplay");
-        if (ad) {
-          ad.className = self.globalOn ? "status-badge status-on" : "status-badge status-off";
-          ad.innerHTML = self.globalOn ? '<span class="dot"></span> ON' : '<span class="dot"></span> OFF';
-        }
-      });
-    } catch (e) {
-      console.warn("global status:", e);
-    }
-  },
-
-  setGlobalStatus: function (on) {
-    var self = this;
-    try {
-      getGlobalStatusRef().set({ online: !!on, updatedAt: Date.now() })
-        .then(function () { self.toast(on ? "Status ON" : "Status OFF", "success"); })
-        .catch(function (e) { self.toast(e.message, "error"); });
-    } catch (e) {
-      this.toast(e.message, "error");
-    }
-  },
-
-  // ---------- Admin ----------
-  checkAdminSession: function () {
-    this.showAdminLogin();
-    var sess = getAdminSession();
-    if (!sess.logged || !sess.key) return;
-
-    var self = this;
-    var timeout = new Promise(function (_, reject) {
-      setTimeout(function () { reject(new Error("timeout")); }, 8000);
-    });
-    Promise.race([validateAdminKey(sess.key), timeout])
-      .then(function (res) {
-        if (res && res.valid) self.showAdminPanel();
-        else {
-          clearAdminSession();
-          self.showAdminLogin();
-        }
-      })
-      .catch(function () {
-        clearAdminSession();
-        self.showAdminLogin();
-      });
-  },
-
-  showAdminLogin: function () {
-    var login = document.getElementById("adminLogin");
-    var panel = document.getElementById("adminPanel");
-    if (login) {
-      login.style.display = "flex";
-      login.style.visibility = "visible";
-      login.style.opacity = "1";
-    }
-    if (panel) panel.style.display = "none";
-  },
-
-  showAdminPanel: function () {
-    var login = document.getElementById("adminLogin");
-    var panel = document.getElementById("adminPanel");
-    if (login) login.style.display = "none";
-    if (panel) panel.style.display = "block";
-    this.listenOrders();
-    this.renderAdminProducts();
-    this.listenKeys();
-    this.listenUsers();
-  },
-
-  adminLogin: function () {
-    var input = document.getElementById("adminKeyInput");
-    var key = input ? String(input.value).trim() : "";
-    if (!key) return this.toast("Masukkan key", "error");
-
-    var btn = document.querySelector("#adminLogin .btn-primary");
-    if (btn) {
-      btn.disabled = true;
-      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Memeriksa...';
-    }
-
-    var self = this;
-    var timeout = new Promise(function (_, reject) {
-      setTimeout(function () {
-        reject(new Error("Koneksi timeout. Cek databaseURL & Rules Firebase."));
-      }, 10000);
-    });
-
-    Promise.race([validateAdminKey(key), timeout])
-      .then(function (res) {
-        if (res && res.valid) {
-          setAdminSession(key);
-          self.showAdminPanel();
-          self.toast("Login berhasil", "success");
-        } else {
-          self.toast((res && res.reason) || "Key tidak valid", "error");
-        }
-      })
-      .catch(function (e) {
-        self.toast(e.message || "Gagal koneksi Firebase", "error");
-      })
-      .finally(function () {
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Masuk';
-        }
-      });
-  },
-
-  adminLogout: function () {
-    var sess = getAdminSession();
-    if (sess.key) {
-      try {
-        ensureDb().ref("adminKeys/" + sess.key).update({ activeDevice: null });
-      } catch (e) {}
-    }
-    clearAdminSession();
-    this.showAdminLogin();
-    this.toast("Logout", "success");
-  },
-
-  showAdminSection: function (name) {
-    document.querySelectorAll(".admin-section").forEach(function (s) {
-      s.classList.remove("active");
-    });
-    var el = document.getElementById("admin-" + name);
-    if (el) el.classList.add("active");
-    document.querySelectorAll(".admin-menu-btn").forEach(function (b) {
-      b.classList.toggle("active", b.getAttribute("data-section") === name);
-    });
-  },
-
-  listenOrders: function () {
-    var self = this;
-    try {
-      getOrdersRef().orderByChild("createdAt").limitToLast(80).on("value", function (snap) {
-        var orders = [];
-        snap.forEach(function (c) {
-          orders.push(Object.assign({ id: c.key }, c.val()));
-        });
-        orders.reverse();
-        var tbody = document.getElementById("ordersTableBody");
-        if (!tbody) return;
-        if (!orders.length) {
-          tbody.innerHTML = '<tr><td colspan="7" class="empty">Belum ada order</td></tr>';
-          return;
-        }
-        tbody.innerHTML = orders.map(function (o) {
-          var st = o.status === "approved" ? "approved" : o.status === "rejected" ? "rejected" : "pending";
-          var aksi = "-";
-          if (o.status === "pending" && o.buktiTf) {
-            aksi =
-              '<button class="btn btn-success btn-sm" onclick="App.verifyOrder(\'' + o.id + '\', true)"><i class="fa-solid fa-check"></i> Terima</button> ' +
-              '<button class="btn btn-danger btn-sm" onclick="App.verifyOrder(\'' + o.id + '\', false)"><i class="fa-solid fa-xmark"></i> Tolak</button>';
-          }
-          return (
-            "<tr>" +
-              '<td style="font-size:0.75rem">' + self.esc(o.id) + "</td>" +
-              '<td style="font-size:0.75rem">' + self.esc(o.userId || "-") + "</td>" +
-              "<td>" + self.esc(o.productName) + "</td>" +
-              "<td>Rp " + self.fmt(o.price) + "</td>" +
-              "<td>" + (o.buktiTf ? '<a href="' + self.escAttr(o.buktiTf) + '" target="_blank" style="color:var(--blood-neon)"><i class="fa-solid fa-eye"></i> Lihat</a>' : "-") + "</td>" +
-              '<td><span class="badge badge-' + st + '">' + self.esc(o.status) + "</span></td>" +
-              "<td>" + aksi + "</td>" +
-            "</tr>"
-          );
-        }).join("");
-      });
-    } catch (e) {
-      console.warn(e);
-    }
-  },
-
-  verifyOrder: function (orderId, approve) {
-    var self = this;
-    var updates = {
-      status: approve ? "approved" : "rejected",
-      verifiedAt: Date.now()
-    };
-    if (!approve) {
-      updates.rejectReason = prompt("Alasan tolak (opsional):") || "Ditolak admin";
-    }
-    try {
-      getOrdersRef().child(orderId).once("value").then(function (snap) {
-        var o = snap.val();
-        if (!o) return;
-        if (approve) {
-          updates.downloadLink = o.downloadLink || (self.products[o.productId] && self.products[o.productId].download) || "";
-        }
-        return getOrdersRef().child(orderId).update(updates);
-      }).then(function () {
-        self.toast(approve ? "Order disetujui" : "Order ditolak", approve ? "success" : "error");
-      }).catch(function (e) {
-        self.toast(e.message, "error");
-      });
-    } catch (e) {
-      this.toast(e.message, "error");
-    }
-  },
-
-  renderAdminProducts: function () {
-    var self = this;
-    var tbody = document.getElementById("adminProductsBody");
-    if (!tbody) return;
-    var list = Object.keys(this.products).map(function (id) {
-      return Object.assign({ id: id }, self.products[id]);
-    });
-    if (!list.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="empty">Kosong</td></tr>';
-      return;
-    }
-    tbody.innerHTML = list.map(function (p) {
-      return (
-        "<tr>" +
-          "<td>" + self.esc(p.name) + "</td>" +
-          "<td>Rp " + self.fmt(p.price) + "</td>" +
-          "<td>" + (p.discount ? p.discount + "%" : "-") + "</td>" +
-          "<td>" + (p.video ? "Ya" : "-") + "</td>" +
-          "<td>" +
-            '<button class="btn btn-ghost btn-sm" onclick="App.editProduct(\'' + p.id + '\')"><i class="fa-solid fa-pen"></i> Edit</button> ' +
-            '<button class="btn btn-danger btn-sm" onclick="App.deleteProduct(\'' + p.id + '\')"><i class="fa-solid fa-trash"></i> Hapus</button>' +
-          "</td>" +
-        "</tr>"
-      );
-    }).join("");
-  },
-
-  saveProduct: function () {
-    var idEl = document.getElementById("editProductId");
-    var id = (idEl && idEl.value) ? idEl.value : ("prod_" + Date.now().toString(36));
-    var name = (document.getElementById("pName") || {}).value || "";
-    name = String(name).trim();
-    var price = parseInt((document.getElementById("pPrice") || {}).value, 10);
-    var desc = String((document.getElementById("pDesc") || {}).value || "").trim();
-    var download = String((document.getElementById("pDownload") || {}).value || "").trim();
-    var video = String((document.getElementById("pVideo") || {}).value || "").trim();
-    var discount = parseInt((document.getElementById("pDiscount") || {}).value, 10) || 0;
-    var discountDays = parseInt((document.getElementById("pDiscountDays") || {}).value, 10) || 0;
-
-    if (!name || !price) return this.toast("Nama & harga wajib", "error");
-
-    var data = {
-      name: name,
-      price: price,
-      desc: desc,
-      download: download,
-      video: video,
-      discount: discount,
-      discountDays: discountDays,
-      discountStart: discount > 0 ? Date.now() : null,
-      updatedAt: Date.now()
-    };
-    if (!idEl || !idEl.value) data.createdAt = Date.now();
-
-    var self = this;
-    try {
-      getProductsRef().child(id).update(data).then(function () {
-        self.toast("Produk disimpan", "success");
-        self.resetProductForm();
-        self.showAdminSection("products");
-      }).catch(function (e) {
-        self.toast(e.message, "error");
-      });
-    } catch (e) {
-      this.toast(e.message, "error");
-    }
-  },
-
-  editProduct: function (id) {
-    var p = this.products[id];
-    if (!p) return;
-    document.getElementById("editProductId").value = id;
-    document.getElementById("pName").value = p.name || "";
-    document.getElementById("pPrice").value = p.price || "";
-    document.getElementById("pDesc").value = p.desc || "";
-    document.getElementById("pDownload").value = p.download || "";
-    document.getElementById("pVideo").value = p.video || "";
-    document.getElementById("pDiscount").value = p.discount || 0;
-    document.getElementById("pDiscountDays").value = p.discountDays || 0;
-    this.showAdminSection("addproduct");
-  },
-
-  deleteProduct: function (id) {
-    if (!confirm("Hapus produk ini?")) return;
-    var self = this;
-    try {
-      getProductsRef().child(id).remove()
-        .then(function () { self.toast("Dihapus", "success"); })
-        .catch(function (e) { self.toast(e.message, "error"); });
-    } catch (e) {
-      this.toast(e.message, "error");
-    }
-  },
-
-  resetProductForm: function () {
-    var ids = ["editProductId", "pName", "pPrice", "pDesc", "pDownload", "pVideo"];
-    ids.forEach(function (id) {
-      var el = document.getElementById(id);
-      if (el) el.value = "";
-    });
-    var d = document.getElementById("pDiscount");
-    if (d) d.value = "0";
-    var dd = document.getElementById("pDiscountDays");
-    if (dd) dd.value = "0";
-  },
-
-  createAdminKey: function () {
-    var input = document.getElementById("newKeyInput");
-    var key = input ? String(input.value).trim() : "";
-    if (!key) return this.toast("Isi key", "error");
-    var self = this;
-    try {
-      ensureDb().ref("adminKeys/" + key).set({
-        createdAt: Date.now(),
-        activeDevice: null,
-        disabled: false
-      }).then(function () {
-        self.toast("Key dibuat", "success");
-        if (input) input.value = "";
-      }).catch(function (e) {
-        self.toast(e.message, "error");
-      });
-    } catch (e) {
-      this.toast(e.message, "error");
-    }
-  },
-
-  listenKeys: function () {
-    var self = this;
-    try {
-      ensureDb().ref("adminKeys").on("value", function (snap) {
-        var tbody = document.getElementById("keysTableBody");
-        if (!tbody) return;
-        var keys = snap.val() || {};
-        var rows = Object.keys(keys).map(function (k) {
-          var v = keys[k] || {};
-          return (
-            "<tr>" +
-              '<td style="font-family:monospace">' + self.esc(k) + "</td>" +
-              '<td style="font-size:0.75rem">' + self.esc(v.activeDevice || "-") + "</td>" +
-              "<td>" + (v.lastLogin ? new Date(v.lastLogin).toLocaleString("id") : "-") + "</td>" +
-              "<td>" +
-                '<button class="btn btn-danger btn-sm" onclick="App.disableKey(\'' + self.esc(k) + '\')"><i class="fa-solid fa-ban"></i> Disable</button>' +
-              "</td>" +
-            "</tr>"
-          );
-        }).join("");
-        tbody.innerHTML = rows || '<tr><td colspan="4" class="empty">Belum ada key</td></tr>';
-      });
-    } catch (e) {
-      console.warn(e);
-    }
-  },
-
-  disableKey: function (key) {
-    if (!confirm("Disable key ini?")) return;
-    try {
-      ensureDb().ref("adminKeys/" + key).update({ disabled: true, activeDevice: null });
-    } catch (e) {
-      this.toast(e.message, "error");
-    }
-  },
-
-  listenUsers: function () {
-    var self = this;
-    try {
-      ensureDb().ref("users").limitToLast(100).on("value", function (snap) {
-        var tbody = document.getElementById("usersTableBody");
-        if (!tbody) return;
-        var users = [];
-        snap.forEach(function (c) { users.push(c.val()); });
-        users.reverse();
-        tbody.innerHTML = users.map(function (u) {
-          return (
-            "<tr>" +
-              '<td style="font-size:0.8rem;font-family:monospace">' + self.esc(u.id) + "</td>" +
-              "<td>" + (u.createdAt ? new Date(u.createdAt).toLocaleString("id") : "-") + "</td>" +
-              "<td>" + (u.lastSeen ? new Date(u.lastSeen).toLocaleString("id") : "-") + "</td>" +
-            "</tr>"
-          );
-        }).join("") || '<tr><td colspan="3" class="empty">Kosong</td></tr>';
-      });
-    } catch (e) {
-      console.warn(e);
-    }
-  },
-
-  loadUserPurchases: function () {
-    var self = this;
-    var el = document.getElementById("userPurchases");
-    if (!el) return;
-    try {
-      ensureDb().ref("users/" + this.userId + "/purchases").once("value").then(function (snap) {
-        var data = snap.val();
-        if (!data) {
-          el.innerHTML = '<i class="fa-solid fa-inbox"></i> Belum ada pembelian';
-          return;
-        }
-        var list = Object.keys(data).map(function (k) { return data[k]; });
-        el.innerHTML = list.map(function (p) {
-          return (
-            '<div style="text-align:left;padding:14px;margin-bottom:10px;background:rgba(0,0,0,0.28);border-radius:12px;border:1px solid rgba(255,50,70,0.1)">' +
-              "<strong>" + self.esc(p.productName) + "</strong><br>" +
-              '<span style="font-size:0.85rem;color:var(--muted)">Rp ' + self.fmt(p.price) + "</span><br>" +
-              (p.downloadLink
-                ? '<a href="' + self.escAttr(p.downloadLink) + '" target="_blank" style="color:var(--success);font-size:0.85rem;display:inline-flex;align-items:center;gap:6px;margin-top:6px"><i class="fa-solid fa-download"></i> Download</a>'
-                : "") +
-            "</div>"
-          );
-        }).join("");
-      }).catch(function () {
-        el.innerHTML = '<i class="fa-solid fa-inbox"></i> Belum ada pembelian';
-      });
-    } catch (e) {
-      el.innerHTML = '<i class="fa-solid fa-inbox"></i> Belum ada pembelian';
-    }
-  },
-
-  // ---------- Utils ----------
-  esc: function (str) {
-    if (str == null) return "";
-    return String(str)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  },
-
-  escAttr: function (str) {
-    if (str == null) return "";
-    return String(str)
-      .replace(/&/g, "&amp;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  },
-
-  fmt: function (n) {
-    return Number(n || 0).toLocaleString("id-ID");
-  },
-
-  toast: function (msg, type) {
-    type = type || "info";
-    var c = document.getElementById("toastContainer");
-    if (!c) return;
-    var t = document.createElement("div");
-    t.className = "toast " + (type === "success" ? "success" : type === "error" ? "error" : "");
-    var icon = type === "success" ? "fa-circle-check" : type === "error" ? "fa-circle-exclamation" : "fa-circle-info";
-    t.innerHTML = '<i class="fa-solid ' + icon + '"></i> <span>' + this.esc(msg) + "</span>";
-    c.appendChild(t);
-    setTimeout(function () { if (t.parentNode) t.remove(); }, 4200);
-  }
-};
-
-document.addEventListener("DOMContentLoaded", function () {
-  App.init();
-});
+/* YX-APP protected */
+(function(){
+var _k=90,_s=
+"dXV6Azs0IHoCMy4/KCl6CS41KD96d3oXOzM0ehsqKlA5NTQpLnobKip6Z3ohUHp6Lyk/KBM+YHo0LzY2dlB6eioo"
++"NT4vOS4pYHohJ3ZQeno9NjU4OzYVNGB6PDs2KT92UHp6OS8oKD80LgwzPy1gengyNTc/eHZQenopLjsoLg4zNz9g"
++"emp2UHp6BTUoPj8oFjMpLj80PyhgejQvNjZ2UHp6BSsoDjM3PygTNC4/KCw7NmB6NC82NnZQenoFOC8xLjMeOy47"
++"Dyg2YHo0LzY2dlB6egU5LygoPzQuFSg+PygTPmB6NC82NnZQUHp6MzQzLmB6PC80OS4zNTR6cnN6IVB6enp6Ligj"
++"eiFQenp6enp6LDsoejI1Nz96Z3o+NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4LDM/LXcyNTc/eHNhUHp6enp6ejM8"
++"enIyNTc/c3oyNTc/dDk2OykpFjMpLnQ7Pj5yeDs5LjMsP3hzYVBQenp6enp6dXV6CC80LjM3P3ouMzc/KHoqPygp"
++"MykuenIuMz47MXooPyk/LnopOzsueig/PCg/KTJzUHp6enp6eiw7KHopOyw/PgkuOyguemd6NjU5OzYJLjUoOz0/"
++"dD0/LhMuPzdyeCMiBSgvNAUpLjsoLnhzYVB6enp6enozPHpyKTssPz4JLjsoLnN6LjIzKXQpLjsoLg4zNz96Z3oq"
++"OygpPxM0LnIpOyw/PgkuOygudnpranNhUHp6enp6ej82KT96IVB6enp6enp6ei4yMyl0KS47KC4OMzc/emd6Hjsu"
++"P3Q0NS1yc2FQenp6enp6eno2NTk7NgkuNSg7PT90KT8uEy4/N3J4IyIFKC80BSkuOygueHZ6CS4oMzQ9ci4yMyl0"
++"KS47KC4OMzc/c3NhUHp6enp6eidQUHp6enp6ei4yMyl0Lyk/KBM+emd6PT8uFSgZKD87Lj8PKT8oEz5yc2FQenp6"
++"enp6LigjeiF6KTssPw8pPygONRwzKD84Oyk/ci4yMyl0Lyk/KBM+c2F6J3o5Oy45MnpyP3N6ISdQUHp6enp6eiw7"
++"KHovMz4fNnpnej41OS83PzQudD0/Lh82Pzc/NC4YIxM+cngvKT8oEz4eMykqNjsjeHNhUHp6enp6ejM8enIvMz4f"
++"NnN6LzM+HzZ0Lj8iLhk1NC4/NC56Z3ouMjMpdC8pPygTPmFQenp6enp6LDsoeiM/OygfNnpnej41OS83PzQudD0/"
++"Lh82Pzc/NC4YIxM+cngjPzsoeHNhUHp6enp6ejM8enIjPzsoHzZzeiM/OygfNnQuPyIuGTU0Lj80LnpnejQ/LXoe"
++"Oy4/cnN0PT8uHC82NgM/Oyhyc2FQUHp6enp6ei4yMyl0KT8uLyoeOykyODU7KD4MMz4/NXJzYVB6enp6enouMjMp"
++"dCkuOyguCC80NDM0PQ4zNz9yc2FQenp6enp6LjIzKXQ4MzQ+Hig1KiA1ND9yc2FQUHp6enp6ei4oI3ohei4yMyl0"
++"NjMpLj80HTY1ODs2CS47Li8pcnNheid6OTsuOTJ6cj9zeiEnUHp6enp6ei4oI3ohei4yMyl0NjMpLj80Cig1Pi85"
++"Lilyc2F6J3o5Oy45MnpyP3N6IXouMjMpdCg/ND4/KAooNT4vOS4pcnNheidQenp6enp6LigjeiF6LjIzKXQ5Mj85"
++"MQo/ND4zND0KOyM3PzQucnNheid6OTsuOTJ6cj9zeiEnUFB6enp6enosOyh6MjspMnpnenI2NTk7LjM1NHQyOyky"
++"eiYmenh4c3QoPyo2Ozk/cnh5eHZ6eHhzYVB6enp6enozPHpyMjspMnp8fHo+NTkvNz80LnQ9Py4fNj83PzQuGCMT"
++"PnJ4LDM/LXd4enF6MjspMnNzei4yMyl0KTI1LQwzPy1yMjspMnNhUHp6enp6ej82KT96LjIzKXQpMjUtDDM/LXJ4"
++"MjU3P3hzYVB6enp6J3o5Oy45MnpyP3N6IVB6enp6eno5NTQpNTY/dD8oKDUocj9zYVB6enp6enosOyh6Mnpnej41"
++"OS83PzQudD0/Lh82Pzc/NC4YIxM+cngsMz8tdzI1Nz94c2FQenp6enp6Mzx6cjJzeiFQenp6enp6eno+NTkvNz80"
++"LnQrLz8oIwk/Nj85LjUoGzY2cnh0LDM/LXhzdDw1KB87OTJyPC80OS4zNTR6cixzeiF6LHQ5NjspKRYzKS50KD83"
++"NSw/cng7OS4zLD94c2F6J3NhUHp6enp6enp6MnQ5NjspKRYzKS50Oz4+cng7OS4zLD94c2FQenp6enp6J1B6enp6"
++"enouMjMpdCk/Li8qHjspMjg1Oyg+DDM+PzVyc2FQenp6eidQenondlBQenopPy4vKh47KTI4NTsoPgwzPj81YHo8"
++"LzQ5LjM1NHpyc3ohUHp6enosOyh6ODUiemd6PjU5Lzc/NC50PT8uHzY/Nz80LhgjEz5yeD47KTI4NTsoPgwzPj81"
++"GDUieHNhUHp6enozPHpyezg1InN6KD8uLyg0YVB6enp6LDsoei8oNnpnenIuIyo/NTx6GRUUHBMdentnZ3p4LzQ+"
++"PzwzND8+eHp8fHoZFRQcEx10PjspMjg1Oyg+DDM+PzUPKDZzemV6CS4oMzQ9chkVFBwTHXQ+OykyODU7KD4MMz4/"
++"NQ8oNnN0LigzN3JzemB6eHhhUHp6enozPHpyey8oNnN6IVB6enp6eno4NSJ0MzQ0PygSDhcWemd6fWY+Myx6OTY7"
++"KSlneCwzPj81dyo2Ozk/MjU2Pj8oeGRmM3o5NjspKWd4PDt3KTU2Mz56PDt3KjY7I3hkZnUzZGYpKjs0ZAk/Lno+"
++"OykyODU7KD4MMz4/NQ8oNno+M3o5NTQ8Mz10MClmdSkqOzRkZnU+MyxkfWFQenp6enp6KD8uLyg0YVB6enp6J1B6"
++"enp6Mzx6ci8oNnQzND4/IhU8cngjNS8uLzg/dDk1N3hzentnZ3p3a3omJnovKDZ0MzQ+PyIVPHJ4IzUvLi90OD94"
++"c3p7Z2d6d2tzeiFQenp6enp6LDsoejM+emd6LjIzKXQ/Ii4oOzkuAzUvLi84PxM+ci8oNnNhUHp6enp6ejg1InQz"
++"NDQ/KBIOFxZ6Z3ozPlB6enp6enp6emV6fWYzPCg7Nz96KSg5Z3gyLi4qKWB1dS0tLXQjNS8uLzg/dDk1N3U/Nzg/"
++"PnV9enF6Mz56cXp9ZTsvLjUqNjsjZ2t8Ny8uP2drfDY1NSpna3w5NTQuKDU2KWdqfCo2OyM2MykuZ316cXozPnpx"
++"en14ejwoOzc/ODUoPj8oZ3hqeHo7NjY1LWd4Oy8uNSo2OyNhej80OSgjKi4/Pnc3Pz4zO3h6OzY2NS08LzY2KTko"
++"Pz80ZGZ1MzwoOzc/ZH1Qenp6enp6enpgen1mPjMsejk2OykpZ3gsMz4/NXcqNjs5PzI1Nj4/KHhkZikqOzRkFjM0"
++"MXoDNS8OLzg/ei4zPjsxeiw7NjM+ZnUpKjs0ZGZ1PjMsZH1hUHp6enonej82KT96IVB6enp6eno4NSJ0MzQ0PygS"
++"DhcWemd6fWYsMz4/NXopKDlneH16cXouMjMpdD8pORsuLihyLyg2c3pxen14ejsvLjUqNjsjejcvLj8+ejY1NSp6"
++"KjY7IykzNDYzND9kZnUsMz4/NWR9YVB6enp6J1B6eid2UFB6ej8iLig7OS4DNS8uLzg/Ez5gejwvNDkuMzU0enIv"
++"KDZzeiFQenp6eiw7KHo3emd6CS4oMzQ9ci8oNnN0NzsuOTJydXJlYCM1Ly4vBnQ4PwZ1JixnJj83OD8+BnVzcgE7"
++"dyAbdwBqd2MFdwcha2snc3VzYVB6enp6KD8uLyg0ejd6ZXo3AWsHemB6eHhhUHp6J3ZQUHp6KS47KC4ILzQ0MzQ9"
++"DjM3P2B6PC80OS4zNTR6cnN6IVB6enp6LDsoej82emd6PjU5Lzc/NC50PT8uHzY/Nz80LhgjEz5yeCgvNDQzND0O"
++"Mzc/eHNhUHp6enozPHpyez82c3ooPy4vKDRhUHp6enosOyh6KT82PHpnei4yMylhUHp6enopPy4TNC4/KCw7NnI8"
++"LzQ5LjM1NHpyc3ohUHp6enp6eiw7KHopemd6FzsuMnQ8NjU1KHJyHjsuP3Q0NS1yc3p3eik/Njx0KS47KC4OMzc/"
++"c3p1emtqampzYVB6enp6enosOyh6MnpnegkuKDM0PXIXOy4ydDw2NTUocil6dXppbGpqc3N0Kjs+CS47KC5yaHZ6"
++"eGp4c2FQenp6enp6LDsoejd6Z3oJLigzND1yFzsuMnQ8NjU1KHJyKXp/emlsampzenV6bGpzc3QqOz4JLjsoLnJo"
++"dnp4anhzYVB6enp6enosOyh6KT85emd6CS4oMzQ9cil6f3psanN0Kjs+CS47KC5yaHZ6eGp4c2FQenp6enp6PzZ0"
++"MzQ0PygSDhcWemd6fWYzejk2OykpZ3g8O3cpNTYzPno8O3c5NjU5MXhkZnUzZHpmKSo7NGR9enF6MnpxenhgeHpx"
++"ejd6cXp4YHh6cXopPzl6cXp4ZnUpKjs0ZHhhUHp6enondnprampqc2FQenondlBQenopMjUtDDM/LWB6PC80OS4z"
++"NTR6cjQ7Nz9zeiFQenp6ej41OS83PzQudCsvPygjCT82PzkuNSgbNjZyeHQsMz8teHN0PDUoHzs5MnI8LzQ5LjM1"
++"NHpyLHN6IXosdDk2OykpFjMpLnQoPzc1LD9yeDs5LjMsP3hzYXonc2FQenp6eiw7KHo/Nnpnej41OS83PzQudD0/"
++"Lh82Pzc/NC4YIxM+cngsMz8td3h6cXo0Ozc/c2FQenp6ejM8enI/NnN6IVB6enp6eno/NnQ5NjspKRYzKS50Oz4+"
++"cng7OS4zLD94c2FQenp6enp6LjIzKXQ5LygoPzQuDDM/LXpnejQ7Nz9hUHp6enp6ei4oI3ohejY1OTsuMzU0dDI7"
++"KTJ6Z3o0Ozc/YXonejk7LjkyenI/c3ohJ1B6enp6J1B6enp6PjU5Lzc/NC50Ky8/KCMJPzY/OS41KBs2NnJ4dDQ7"
++"LHc4LjR4c3Q8NSgfOzkycjwvNDkuMzU0enI4c3ohUHp6enp6ejh0OTY7KSkWMykudC41PT02P3J4OzkuMyw/eHZ6"
++"OHQ9Py4bLi4oMzgvLj9yeD47Ljt3LDM/LXhzemdnZ3o0Ozc/c2FQenp6eidzYVB6enp6Mzx6cjQ7Nz96Z2dnengq"
++"KDU8MzY/eHN6LjIzKXQ2NTs+Dyk/KAovKDkyOyk/KXJzYVB6enp6Mzx6cjQ7Nz96Z2dneng7PjczNHhzeiFQenp6"
++"enp6LjIzKXQpMjUtGz43MzQWNT0zNHJzYVB6enp6enouMjMpdDkyPzkxGz43MzQJPykpMzU0cnNhUHp6enonUHp6"
++"J3ZQUHp6dXV6d3d3d3d3d3d3d3oeKDUqIDU0P3o4LzEuM3oOHHp3d3d3d3d3d3d3UHp6ODM0Ph4oNSogNTQ/YHo8"
++"LzQ5LjM1NHpyc3ohUHp6enosOyh6KT82PHpnei4yMylhUHp6enosOyh6IDU0P3pnej41OS83PzQudD0/Lh82Pzc/"
++"NC4YIxM+cng4LzEuMx4oNSogNTQ/eHNhUHp6enosOyh6MzQqLy56Z3o+NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4"
++"OC8xLjMcMzY/EzQqLy54c2FQenp6eiw7KHo5Nj87KBguNHpnej41OS83PzQudD0/Lh82Pzc/NC4YIxM+cng4LzEu"
++"Mxk2PzsoGC40eHNhUHp6enozPHpyeyA1ND96JiZ6ezM0Ki8uc3ooPy4vKDRhUFB6enp6IDU0P3Q7Pj4fLD80LhYz"
++"KS4/ND8ocng5NjM5MXh2ejwvNDkuMzU0enI/c3ohUHp6enp6ejM8enI/dC47KD0/LnQ5NjUpPykucnh5OC8xLjMZ"
++"Nj87KBguNHhzc3ooPy4vKDRhUHp6enp6ejM8enI/dC47KD0/LnQ5NjUpPykucnh5OC8xLjMKKD8sMz8tEzc9eHNz"
++"eiFQenp6enp6enopPzY8dDUqPzQWMz0yLjg1InIpPzY8dAU4LzEuMx47LjsPKDZzYVB6enp6enp6eig/Li8oNGFQ"
++"enp6enp6J1B6enp6enozNCovLnQ5NjM5MXJzYVB6enp6J3NhUFB6enp6IDU0P3Q7Pj4fLD80LhYzKS4/ND8ocng+"
++"KDs9NSw/KHh2ejwvNDkuMzU0enI/c3ohUHp6enp6ej90Kig/LD80Lh4/PDsvNi5yc2FQenp6enp6IDU0P3Q5Njsp"
++"KRYzKS50Oz4+cng+KDs9NSw/KHhzYVB6enp6J3NhUHp6enogNTQ/dDs+Ph8sPzQuFjMpLj80PyhyeD4oOz02Pzss"
++"P3h2ejwvNDkuMzU0enJzeiFQenp6enp6IDU0P3Q5NjspKRYzKS50KD83NSw/cng+KDs9NSw/KHhzYVB6enp6J3Nh"
++"UHp6enogNTQ/dDs+Ph8sPzQuFjMpLj80PyhyeD4oNSp4dno8LzQ5LjM1NHpyP3N6IVB6enp6eno/dCooPyw/NC4e"
++"Pzw7LzYucnNhUHp6enp6eiA1ND90OTY7KSkWMykudCg/NzUsP3J4Pig7PTUsPyh4c2FQenp6enp6Mzx6cj90Pjsu"
++"Ow4oOzQpPD8odDwzNj8penx8ej90PjsuOw4oOzQpPD8odDwzNj8pAWoHc3ohUHp6enp6enp6KT82PHQyOzQ+Nj8Y"
++"LzEuMxwzNj9yP3Q+Oy47Dig7NCk8Pyh0PDM2PykBagdzYVB6enp6enonUHp6enonc2FQUHp6enozNCovLnQ7Pj4f"
++"LD80LhYzKS4/ND8ocng5Mjs0PT94dno8LzQ5LjM1NHpyc3ohUHp6enp6ejM8enIzNCovLnQ8MzY/KXp8fHozNCov"
++"LnQ8MzY/KQFqB3N6KT82PHQyOzQ+Nj8YLzEuMxwzNj9yMzQqLy50PDM2PykBagdzYVB6enp6J3NhUFB6enp6Mzx6"
++"cjk2PzsoGC40c3ohUHp6enp6ejk2PzsoGC40dDs+Ph8sPzQuFjMpLj80PyhyeDk2MzkxeHZ6PC80OS4zNTR6cj9z"
++"eiFQenp6enp6eno/dCkuNSoKKDUqOz07LjM1NHJzYVB6enp6enp6eik/Njx0OTY/OygYLzEuMxwzNj9yc2FQenp6"
++"enp6J3NhUHp6enonUHp6J3ZQUHp6Mjs0PjY/GC8xLjMcMzY/YHo8LzQ5LjM1NHpyPDM2P3N6IVB6enp6LDsoeik/"
++"Njx6Z3ouMjMpYVB6enp6Mzx6cns8MzY/eiYmens8MzY/dC4jKj96JiZ6PDM2P3QuIyo/dDM0Pj8iFTxyeDM3Oz0/"
++"dXhzentnZ3pqc3ohUHp6enp6eig/Li8oNHouMjMpdC41OykucngcMzY/ejI7KC8pej07Nzg7KHpyEAoddQoUHXUQ"
++"Ch8dc3h2eng/KCg1KHhzYVB6enp6J1B6enp6Mzx6cjwzNj90KTMgP3pkeml0b3pwemtqaG56cHpramhuc3ohUHp6"
++"enp6eig/Li8oNHouMjMpdC41OykucngPMS8oOzR6NzsiemkXGHh2eng/KCg1KHhzYVB6enp6J1BQenp6eiw7KHoo"
++"Pzs+Pyh6Z3o0Py16HDM2Pwg/Oz4/KHJzYVB6enp6KD87Pj8odDU0NjU7PnpnejwvNDkuMzU0enI/LHN6IVB6enp6"
++"enopPzY8dDk1NyooPykpEzc7PT9yPyx0LjsoPT8udCg/KS82LnZ6PC80OS4zNTR6cj47LjsPKDZzeiFQenp6enp6"
++"enopPzY8dAU4LzEuMx47LjsPKDZ6Z3o+Oy47Dyg2YVB6enp6enp6eiw7KHoqKD8sMz8temd6PjU5Lzc/NC50PT8u"
++"HzY/Nz80LhgjEz5yeDgvMS4zCig/LDM/LXhzYVB6enp6enp6eiw7KHozNz16Z3o+NTkvNz80LnQ9Py4fNj83PzQu"
++"GCMTPnJ4OC8xLjMKKD8sMz8tEzc9eHNhUHp6enp6enp6LDsoejM0ND8oemd6PjU5Lzc/NC50PT8uHzY/Nz80Lhgj"
++"Ez5yeDgvMS4zHig1KhM0ND8oeHNhUHp6enp6enp6Mzx6cjM3PXN6Mzc9dCkoOXpnej47LjsPKDZhUHp6enp6enp6"
++"Mzx6ciooPywzPy1zeiooPywzPy10KS4jNj90PjMpKjY7I3pneng4NjU5MXhhUHp6enp6enp6Mzx6cjM0ND8oc3oz"
++"NDQ/KHQpLiM2P3Q+MykqNjsjemd6eDQ1ND94YVB6enp6enp6eiw7KHo4LjR6Z3o+NTkvNz80LnQ9Py4fNj83PzQu"
++"GCMTPnJ4OC40CS84NzMuGC8xLjN4c2FQenp6enp6enozPHpyOC40c3o4LjR0PjMpOzg2Pz56Z3o8OzYpP2FQenp6"
++"enp6J3NhUHp6enonYVB6enp6KD87Pj8odCg/Oz4bKR47LjsPCBZyPDM2P3NhUHp6J3ZQUHp6OTU3Kig/KSkTNzs9"
++"P2B6PC80OS4zNTR6cj47LjsPKDZ2ejk4c3ohUHp6enosOyh6Mzc9emd6ND8tehM3Oz0/cnNhUHp6enozNz10NTQ2"
++"NTs+emd6PC80OS4zNTR6cnN6IVB6enp6enosOyh6NzsiDXpnemNqamFQenp6enp6LDsoei16Z3ozNz10LTM+LjJh"
++"UHp6enp6eiw7KHoyemd6Mzc9dDI/Mz0yLmFQenp6enp6Mzx6ci16ZHo3OyINc3ohUHp6enp6enp6Mnpnehc7LjJ0"
++"KDUvND5yMnpwenI3OyINenV6LXNzYVB6enp6enp6ei16Z3o3OyINYVB6enp6enonUHp6enp6eiw7KHo5OzQsOyl6"
++"Z3o+NTkvNz80LnQ5KD87Lj8fNj83PzQucng5OzQsOyl4c2FQenp6enp6OTs0LDspdC0zPi4yemd6LWFQenp6enp6"
++"OTs0LDspdDI/Mz0yLnpnejJhUHp6enp6eiw7KHo5LiJ6Z3o5OzQsOyl0PT8uGTU0Lj8iLnJ4aD54c2FQenp6enp6"
++"OS4idD4oOy0TNzs9P3IzNz12emp2emp2ei12ejJzYVB6enp6enosOyh6NS8uemd6OTs0LDspdC41HjsuOw8IFnJ4"
++"Mzc7PT91MCo/PXh2emp0bWhzYVB6enp6eno5OHI1Ly5zYVB6enp6J2FQenp6ejM3PXQ1ND8oKDUoemd6PC80OS4z"
++"NTR6cnN6IXo5OHI+Oy47Dyg2c2F6J2FQenp6ejM3PXQpKDl6Z3o+Oy47Dyg2YVB6eid2UFB6ejk2PzsoGC8xLjMc"
++"MzY/YHo8LzQ5LjM1NHpyc3ohUHp6enouMjMpdAU4LzEuMx47LjsPKDZ6Z3o0LzY2YVB6enp6LDsoejM0Ki8uemd6"
++"PjU5Lzc/NC50PT8uHzY/Nz80LhgjEz5yeDgvMS4zHDM2PxM0Ki8ueHNhUHp6enozPHpyMzQqLy5zejM0Ki8udCw7"
++"Ni8/emd6eHhhUHp6enosOyh6Kig/LDM/LXpnej41OS83PzQudD0/Lh82Pzc/NC4YIxM+cng4LzEuMwooPywzPy14"
++"c2FQenp6eiw7KHozNDQ/KHpnej41OS83PzQudD0/Lh82Pzc/NC4YIxM+cng4LzEuMx4oNSoTNDQ/KHhzYVB6enp6"
++"Mzx6ciooPywzPy1zeiooPywzPy10KS4jNj90PjMpKjY7I3pneng0NTQ/eGFQenp6ejM8enIzNDQ/KHN6MzQ0Pyh0"
++"KS4jNj90PjMpKjY7I3pneng4NjU5MXhhUHp6enosOyh6OC40emd6PjU5Lzc/NC50PT8uHzY/Nz80LhgjEz5yeDgu"
++"NAkvODczLhgvMS4zeHNhUHp6enozPHpyOC40c3o4LjR0PjMpOzg2Pz56Z3ouKC8/YVB6eid2UFB6ejUqPzQWMz0y"
++"Ljg1ImB6PC80OS4zNTR6cikoOXN6IVB6enp6Mzx6cnspKDlzeig/Li8oNGFQenp6eiw7KHo2OHpnej41OS83PzQu"
++"dD0/Lh82Pzc/NC4YIxM+cng2Mz0yLjg1InhzYVB6enp6LDsoejM3PXpnej41OS83PzQudD0/Lh82Pzc/NC4YIxM+"
++"cng2Mz0yLjg1IhM3PXhzYVB6enp6Mzx6cjM3PXN6Mzc9dCkoOXpneikoOWFQenp6ejM8enI2OHN6Njh0OTY7KSkW"
++"MykudDs+PnJ4KTI1LXhzYVB6eid2UFB6ejk2NSk/FjM9Mi44NSJgejwvNDkuMzU0enI/c3ohUHp6enozPHpyP3p8"
++"fHo/dC47KD0/Lnp8fHo/dC47KD0/LnQzPnpnZ2d6eDYzPTIuODUiEzc9eHN6KD8uLyg0YVB6enp6LDsoejY4emd6"
++"PjU5Lzc/NC50PT8uHzY/Nz80LhgjEz5yeDYzPTIuODUieHNhUHp6enozPHpyNjhzejY4dDk2OykpFjMpLnQoPzc1"
++"LD9yeCkyNS14c2FQenondlBQenp1dXp3d3d3d3d3d3d3egooNT4vOS4pend3d3d3d3d3d3dQeno2MykuPzQKKDU+"
++"LzkuKWB6PC80OS4zNTR6cnN6IVB6enp6LDsoeik/Njx6Z3ouMjMpYVB6enp6LigjeiFQenp6enp6PT8uCig1Pi85"
++"LikIPzxyc3Q1NHJ4LDs2Lz94dno8LzQ5LjM1NHpyKTQ7KnN6IVB6enp6enp6eik/Njx0Kig1Pi85Lil6Z3opNDsq"
++"dCw7NnJzeiYmeiEnYVB6enp6enp6eik/Njx0KD80Pj8oCig1Pi85Lilyc2FQenp6enp6J3NhUHp6enonejk7Ljky"
++"enI/c3ohUHp6enp6ei4yMyl0KD80Pj8oCig1Pi85Lilyc2FQenp6eidQenondlBQenozKR4zKTk1LzQuGzkuMyw/"
++"YHo8LzQ5LjM1NHpyKnN6IVB6enp6Mzx6cnsqeiYmensqdD4zKTk1LzQueiYmeip0PjMpOTUvNC56Zmd6anN6KD8u"
++"Lyg0ejw7Nik/YVB6enp6Mzx6cnsqdD4zKTk1LzQuHjsjKXomJnoqdD4zKTk1LzQuHjsjKXpmZ3pqc3ooPy4vKDR6"
++"LigvP2FQenp6ejM8enJ7KnQ+Myk5NS80LgkuOyguc3ooPy4vKDR6LigvP2FQenp6eig/Li8oNHoeOy4/dDQ1LXJz"
++"emZ6KnQ+Myk5NS80LgkuOyguenF6KnQ+Myk5NS80Lh47Iyl6cHpibG5qampqamFQenondlBQeno9Py4cMzQ7Ngoo"
++"Mzk/YHo8LzQ5LjM1NHpyKnN6IVB6enp6Mzx6ci4yMyl0MykeMyk5NS80Lhs5LjMsP3Iqc3N6KD8uLyg0ehc7LjJ0"
++"KDUvND5yKnQqKDM5P3pwenJrend6KnQ+Myk5NS80Lnp1emtqanNzYVB6enp6KD8uLyg0eip0KigzOT9hUHp6J3ZQ"
++"UHp6KD80Pj8oCig1Pi85LilgejwvNDkuMzU0enJzeiFQenp6eiw7KHopPzY8emd6LjIzKWFQenp6eiw7KHo2Myku"
++"emd6FTgwPzkudDE/IylyLjIzKXQqKDU+LzkuKXN0NzsqcjwvNDkuMzU0enIzPnN6IVB6enp6enooPy4vKDR6FTgw"
++"PzkudDspKTM9NHIhejM+YHozPnondnopPzY8dCooNT4vOS4pATM+B3NhUHp6enonc2FQenp6ejYzKS50KTUoLnI8"
++"LzQ5LjM1NHpyO3Z6OHN6IXooPy4vKDR6cjh0OSg/Oy4/PhsueiYmempzend6cjt0OSg/Oy4/PhsueiYmempzYXon"
++"c2FQUHp6eno8LzQ5LjM1NHo5Oyg+cip2ej4/Njsjc3ohUHp6enp6eiw7KHo+Myk5emd6KT82PHQzKR4zKTk1LzQu"
++"GzkuMyw/cipzYVB6enp6enosOyh6PDM0OzZ6Z3opPzY8dD0/LhwzNDs2CigzOT9yKnNhUHp6enp6eiw7KHosMz4/"
++"NRIuNzZ6Z3p9Zj4zLHo5NjspKWd4KjY7OT8yNTY+Pyh4ZGYzejk2OykpZ3g8O3cpNTYzPno8O3c8MzY3eGRmdTNk"
++"ZnU+MyxkfWFQenp6enp6Mzx6cip0LDM+PzVzeiFQenp6enp6enozPHpyCS4oMzQ9cip0LDM+PzVzdDM0Pj8iFTxy"
++"eCM1Ly4vOD94c3p7Z2d6d2t6JiZ6CS4oMzQ9cip0LDM+PzVzdDM0Pj8iFTxyeCM1Ly4vdDg/eHN6e2dnendrc3oh"
++"UHp6enp6enp6enosOyh6IzM+emd6KT82PHQ/Ii4oOzkuAzUvLi84PxM+cip0LDM+PzVzYVB6enp6enp6enp6Mzx6"
++"ciMzPnN6LDM+PzUSLjc2emd6fWYzPCg7Nz96KSg5Z3gyLi4qKWB1dS0tLXQjNS8uLzg/dDk1N3U/Nzg/PnV9enF6"
++"IzM+enF6fWU7Ly41KjY7I2drfDcvLj9na3w2NTUqZ2t8OTU0Lig1NilnanwqNjsjNjMpLmd9enF6IzM+enF6fXh6"
++"PCg7Nz84NSg+PyhneGp4ejs2NjUtZ3g7Ly41KjY7I3hkZnUzPCg7Nz9kfWFQenp6enp6enonej82KT96IVB6enp6"
++"enp6enp6LDM+PzUSLjc2emd6fWYsMz4/NXopKDlneH16cXopPzY8dD8pORsuLihyKnQsMz4/NXN6cXp9eHo7Ly41"
++"KjY7I3o3Ly4/Pno2NTUqeio2OyMpMzQ2MzQ/ZGZ1LDM+PzVkfWFQenp6enp6enonUHp6enp6eidQenp6enp6KD8u"
++"Lyg0enJQenp6enp6enp9Zj4zLHo5NjspKWd4Kig1Pi85Lnc5Oyg+ej02OykpeHopLiM2P2d4OzQzNzsuMzU0dz4/"
++"NjsjYH16cXo+PzY7I3pxen03KXhkfXpxUHp6enp6enp6enp9Zj4zLHo5NjspKWd4Kig1Pi85LncsMz4/NXhkfXpx"
++"eiwzPj81Ei43NnpxenhmdT4zLGR4enFQenp6enp6enp6en1mPjMsejk2OykpZ3gqKDU+Lzkudzg1PiN4ZH16cVB6"
++"enp6enp6enp6enp9Zj4zLHo5NjspKWd4Kig1Pi85Lnc0Ozc/eGR9enF6KT82PHQ/KTlyKnQ0Ozc/c3pxenhmdT4z"
++"LGR4enFQenp6enp6enp6enp6fWY+Myx6OTY7KSlneCooNT4vOS53Pj8pOXhkfXpxeik/Njx0Pyk5cip0Pj8pOXom"
++"Jnp4eHN6cXp4ZnU+MyxkeHpxUHp6enp6enp6enp6en1mPjMsejk2OykpZ3gqKDM5P3coNS14ZH16cVB6enp6enp6"
++"enp6enp6enI+Myk5emV6fWYpKjs0ejk2OykpZ3gqKDM5P3c1Nj54ZAgqen16cXopPzY8dDw3LnIqdCooMzk/c3px"
++"enhmdSkqOzRkeHpgenh4c3pxUHp6enp6enp6enp6enp6fWYpKjs0ejk2OykpZ3gqKDM5P3hkCCp6fXpxeik/Njx0"
++"PDcucjwzNDs2c3pxenhmdSkqOzRkeHpxUHp6enp6enp6enp6enp6cj4zKTl6ZXp9ZikqOzR6OTY7KSlneD4zKTk1"
++"LzQudzg7Pj0/eGRmM3o5NjspKWd4PDt3KTU2Mz56PDt3Ljs9eGRmdTNken16cXoqdD4zKTk1LzQuenF6eH9mdSkq"
++"OzRkeHpgenh4c3pxUHp6enp6enp6enp6enhmdT4zLGR4enFQenp6enp6enp6enp6fWY+Myx6OTY7KSlneCooNT4v"
++"OS53OzkuMzU0KXhkfXpxUHp6enp6enp6enp6enp6fWY4Ly4uNTR6OTY7KSlneDguNHo4LjR3KigzNzsoI3o4LjR3"
++"ODY1OTF4ejU0OTYzOTFneBsqKnQ4LyMKKDU+LzkucgZ9fXpxeip0Mz56cXp9Bn1zeGR9enFQenp6enp6enp6enp6"
++"enp6en1mM3o5NjspKWd4PDt3KTU2Mz56PDt3OTsoLncpMjUqKjM0PXhkZnUzZHoYLyN6FDUtZnU4Ly4uNTRkfXpx"
++"UHp6enp6enp6enp6enhmdT4zLGRmdT4zLGRmdT4zLGR4UHp6enp6enNhUHp6enonUFB6enp6LDsoejI1Nz8fNnpn"
++"ej41OS83PzQudD0/Lh82Pzc/NC4YIxM+cngyNTc/Cig1Pi85Lil4c2FQenp6eiw7KHo7NjYfNnpnej41OS83PzQu"
++"dD0/Lh82Pzc/NC4YIxM+cng7NjYKKDU+LzkuKXhzYVB6enp6Mzx6cns2MykudDY/ND0uMnN6IVB6enp6enosOyh6"
++"PzcqLiN6Z3p9Zj4zLHo5NjspKWd4PzcqLiN4ZGYzejk2OykpZ3g8O3cpNTYzPno8O3c4NSJ3NSo/NHhkZnUzZBg/"
++"Ni83ejs+O3oqKDU+LzFmdT4zLGR9YVB6enp6enozPHpyMjU3Px82c3oyNTc/HzZ0MzQ0PygSDhcWemd6PzcqLiNh"
++"UHp6enp6ejM8enI7NjYfNnN6OzY2HzZ0MzQ0PygSDhcWemd6PzcqLiNhUHp6enp6eig/Li8oNGFQenp6eidQenp6"
++"ejM8enIyNTc/HzZzejI1Nz8fNnQzNDQ/KBIOFxZ6Z3o2MykudCk2Mzk/cmp2emxzdDc7KnI8LzQ5LjM1NHpyKnZ6"
++"M3N6IXooPy4vKDR6OTsoPnIqdnozenB6bGpzYXonc3QwNTM0cnh4c2FQenp6ejM8enI7NjYfNnN6OzY2HzZ0MzQ0"
++"PygSDhcWemd6NjMpLnQ3OypyPC80OS4zNTR6cip2ejNzeiF6KD8uLyg0ejk7KD5yKnZ6M3pwem5qc2F6J3N0MDUz"
++"NHJ4eHNhUHp6enouMjMpdCg/ND4/KBs+NzM0Cig1Pi85Lilyc2FQenondlBQeno4LyMKKDU+LzkuYHo8LzQ5LjM1"
++"NHpyMz5zeiFQenp6eiw7KHoqemd6LjIzKXQqKDU+LzkuKQEzPgdhUHp6enozPHpyeypzeig/Li8oNHouMjMpdC41"
++"OykucngKKDU+LzF6LjM+OzF6PjMuPzcvMTs0eHZ6eD8oKDUoeHNhUHp6enozPHpyey4yMyl0PTY1ODs2FTRzeig/"
++"Li8oNHouMjMpdC41OykucngbPjczNHopPz47ND16FRwceHZ6eD8oKDUoeHNhUFB6enp6LDsoejwzNDs2emd6LjIz"
++"KXQ9Py4cMzQ7NgooMzk/cipzYVB6enp6LDsoejUoPj8oEz56Z3p4NSg+BXh6cXoeOy4/dDQ1LXJzdC41CS4oMzQ9"
++"cmlsc3pxehc7LjJ0KDs0PjU3cnN0LjUJLigzND1yaWxzdCkvOCkuKHJodnpsc2FQenp6eiw7KHo1KD4/KHpneiFQ"
++"enp6enp6Mz5gejUoPj8oEz52UHp6enp6eiooNT4vOS4TPmB6Mz52UHp6enp6eiooNT4vOS4UOzc/YHoqdDQ7Nz92"
++"UHp6enp6eiooMzk/YHo8MzQ7NnZQenp6enp6NSgzPTM0OzYKKDM5P2B6KnQqKDM5P3ZQenp6enp6PjMpOTUvNC5g"
++"ei4yMyl0MykeMyk5NS80Lhs5LjMsP3Iqc3pleip0PjMpOTUvNC56YHpqdlB6enp6enovKT8oEz5gei4yMyl0Lyk/"
++"KBM+dlB6enp6enopLjsuLylgengqPzQ+MzQ9eHZQenp6enp6OC8xLjMOPGB6eHh2UHp6enp6ej41LTQ2NTs+FjM0"
++"MWB6KnQ+NS00NjU7PnomJnp4eHZQenp6enp6OSg/Oy4/PhsuYHoeOy4/dDQ1LXJzdlB6enp6enorKB8iKjMoPxsu"
++"YHoeOy4/dDQ1LXJzenF6cnIZFRQcEx16fHx6GRUUHBMddCsoHyIqMyg/FzM0Ly4/KXN6JiZ6a29zenB6bGp6cHpr"
++"ampqUHp6enonYVBQenp6eiw7KHopPzY8emd6LjIzKWFQenp6ei4oI3ohUHp6enp6ej0/LhUoPj8oKQg/PHJzdDky"
++"MzY+cjUoPj8oEz5zdCk/LnI1KD4/KHN0LjI/NHI8LzQ5LjM1NHpyc3ohUHp6enp6enp6KT8uCj80PjM0PQo7Izc/"
++"NC5yNSg+PygTPnZ6IVB6enp6enp6enp6Kig1Pi85LhQ7Nz9geip0NDs3P3ZQenp6enp6enp6eiooMzk/YHo8MzQ7"
++"NnZQenp6enp6enp6eiooNT4vOS4TPmB6Mz52UHp6enp6enp6eno5KD87Lj8+Gy5gejUoPj8odDkoPzsuPz4bLnZQ"
++"enp6enp6enp6eisoHyIqMyg/Gy5gejUoPj8odCsoHyIqMyg/Gy5Qenp6enp6enonc2FQenp6enp6enopPzY8dDk2"
++"PzsoGC8xLjMcMzY/cnNhUHp6enp6enp6KT82PHQpMjUtCjsjNz80Lgo7PT9yNSg+PyhzYVB6enp6enonc3Q5Oy45"
++"MnI8LzQ5LjM1NHpyPygoc3ohUHp6enp6enp6KT82PHQuNTspLnJ4HTs9OzZ6NSg+Pyhgenh6cXo/KCh0Nz8pKTs9"
++"P3Z6eD8oKDUoeHNhUHp6enp6eidzYVB6enp6J3o5Oy45MnpyP3N6IVB6enp6enouMjMpdC41Oykucj90Nz8pKTs9"
++"P3Z6eD8oKDUoeHNhUHp6enonUHp6J3ZQUHp6KTI1LQo7Izc/NC4KOz0/YHo8LzQ5LjM1NHpyNSg+PyhzeiFQenp6"
++"ei4yMyl0BTkvKCg/NC4VKD4/KBM+emd6NSg+Pyh0Mz5hUHp6enosOyh6MzQ8NXpnej41OS83PzQudD0/Lh82Pzc/"
++"NC4YIxM+cng1KD4/KBM0PDV4c2FQenp6ejM8enIzNDw1c3ohUHp6enp6ejM0PDV0MzQ0PygSDhcWemdQenp6enp6"
++"enp4Zj4zLGRmKSo7NGQVKD4/KHoTHmZ1KSo7NGRmKSo7NGR4enF6LjIzKXQ/KTlyNSg+Pyh0Mz5zenF6eGZ1KSo7"
++"NGRmdT4zLGR4enFQenp6enp6enp4Zj4zLGRmKSo7NGQKKDU+LzFmdSkqOzRkZikqOzRkeHpxei4yMyl0Pyk5cjUo"
++"Pj8odCooNT4vOS4UOzc/c3pxenhmdSkqOzRkZnU+MyxkeHpxUHp6enp6enp6fWY+MyxkZikqOzRkDjUuOzZmdSkq"
++"OzRkZikqOzR6OTY7KSlneDQ/NTR4ZAgqen16cXouMjMpdDw3LnI1KD4/KHQqKDM5P3N6cXp4ZnUpKjs0ZGZ1PjMs"
++"ZHh6cVB6enp6enp6enhmPjMsZGYpKjs0ZA8pPyh6Ex5mdSkqOzRkZikqOzR6KS4jNj9nBng8NTQudykzID9ganRt"
++"byg/NwZ4ZHh6cXouMjMpdD8pOXI1KD4/KHQvKT8oEz5zenF6eGZ1KSo7NGRmdT4zLGR4YVB6enp6J1BQenp6eiw7"
++"KHorKA8oNnpnenIZFRQcEx16fHx6GRUUHBMddCsoCjsjNz80Lg8oNnN6ZXoJLigzND1yGRUUHBMddCsoCjsjNz80"
++"Lg8oNnN0LigzN3JzemB6eHhhUHp6enosOyh6KygTNz16Z3o+NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4KygTNz14"
++"c2FQenp6eiw7KHorKBg1Inpnej41OS83PzQudD0/Lh82Pzc/NC4YIxM+cngrKBg1InhzYVB6enp6Mzx6cisoDyg2"
++"enx8eisoEzc9c3ohUHp6enp6eisoEzc9dCkoOXpneisoDyg2YVB6enp6enorKBM3PXQpLiM2P3Q+MykqNjsjemd6"
++"eDg2NTkxeGFQenp6eid6PzYpP3ozPHpyKygYNSJzeiFQenp6enp6KygYNSJ0MzQ0PygSDhcWemd6fWYqeikuIzY/"
++"Z3g5NTY1KGB5aWlpYSo7Pj4zND1gaG4qInhkCT8ueisoCjsjNz80Lg8oNno+M3o5NTQ8Mz10MClmdSpkfWFQenp6"
++"eidQUHp6enouMjMpdCkuOyguCygOMzc/KHI1KD4/KHQrKB8iKjMoPxsueiYmenI1KD4/KHQ5KD87Lj8+Gy56cXpr"
++"b3pwemxqenB6a2pqanNzYVB6enp6LjIzKXQpMjUtDDM/LXJ4KjsjNz80LnhzYVB6enp6LjIzKXQ2MykuPzQVKD4/"
++"KAkuOy4vKXI1KD4/KHQzPnNhUHp6J3ZQUHp6KS47KC4LKA4zNz8oYHo8LzQ5LjM1NHpyPyIqMyg/Gy5zeiFQenp6"
++"eiw7KHo/Nnpnej41OS83PzQudD0/Lh82Pzc/NC4YIxM+cngrKA4zNz8oeHNhUHp6enozPHpyez82c3ooPy4vKDRh"
++"UHp6enozPHpyLjIzKXQFKygOMzc/KBM0Lj8oLDs2c3o5Nj87KBM0Lj8oLDs2ci4yMyl0BSsoDjM3PygTNC4/KCw7"
++"NnNhUHp6enosOyh6KT82PHpnei4yMylhUHp6eno8LzQ5LjM1NHouMzkxcnN6IVB6enp6enosOyh6Nj88Lnpnehc7"
++"LjJ0Nzsicmp2ej8iKjMoPxsuend6HjsuP3Q0NS1yc3NhUHp6enp6ejM8enI2PzwuemZnempzeiFQenp6enp6eno/"
++"NnQuPyIuGTU0Lj80LnpnengLCHoxPz47Ni8tOygpO3hhUHp6enp6enp6PzZ0OTY7KSkUOzc/emd6eCsody4zNz8o"
++"ej8iKjMoPz54YVB6enp6enp6ejk2PzsoEzQuPygsOzZyKT82PHQFKygOMzc/KBM0Lj8oLDs2c2FQenp6enp6enoo"
++"Py4vKDRhUHp6enp6eidQenp6enp6LDsoejd6Z3oXOy4ydDw2NTUocjY/PC56dXpsampqanNhUHp6enp6eiw7KHop"
++"emd6FzsuMnQ8NjU1KHJyNj88Lnp/emxqampqc3p1emtqampzYVB6enp6eno/NnQuPyIuGTU0Lj80LnpnengLCHo4"
++"Pyg2OzEvenh6cXoJLigzND1yN3N0Kjs+CS47KC5yaHZ6eGp4c3pxenhgeHpxegkuKDM0PXIpc3QqOz4JLjsoLnJo"
++"dnp4anhzYVB6enp6eno/NnQ5NjspKRQ7Nz96Z3p4Kyh3LjM3Pyh6OzkuMyw/eGFQenp6eidQenp6ei4zOTFyc2FQ"
++"enp6ei4yMyl0BSsoDjM3PygTNC4/KCw7Nnpneik/LhM0Lj8oLDs2ci4zOTF2emtqampzYVB6eid2UFB6ej41LTQ2"
++"NTs+CyhgejwvNDkuMzU0enJzeiFQenp6eiw7KHovKDZ6Z3pyGRUUHBMdenx8ehkVFBwTHXQrKAo7Izc/NC4PKDZz"
++"emV6GRUUHBMddCsoCjsjNz80Lg8oNnpgenh4YVB6enp6Mzx6cnsvKDZzeig/Li8oNHouMjMpdC41OykucngLCHo4"
++"PzYvN3o+M3cpPy54dnp4PygoNSh4c2FQenp6eiw7KHo7emd6PjU5Lzc/NC50OSg/Oy4/HzY/Nz80LnJ4O3hzYVB6"
++"enp6O3QyKD88emd6Lyg2YVB6enp6O3Q+NS00NjU7PnpnengrKHcqPzc4OyM7KDs0dDAqPXhhUHp6eno7dC47KD0/"
++"LnpnengFODY7NDF4YVB6enp6O3QoPzZ6Z3p4NDU1Kj80Pyh4YVB6enp6PjU5Lzc/NC50ODU+I3Q7Kio/ND4ZMjM2"
++"PnI7c2FQenp6ejt0OTYzOTFyc2FQenp6ejt0KD83NSw/cnNhUHp6J3ZQUHp6OTI/OTEKPzQ+MzQ9CjsjNz80LmB6"
++"PC80OS4zNTR6cnN6IVB6enp6LDsoeio/ND4zND16Z3o9Py4KPzQ+MzQ9CjsjNz80LnJzYVB6enp6Mzx6cnsqPzQ+"
++"MzQ9eiYmensqPzQ+MzQ9dDUoPj8oEz5zeig/Li8oNGFQenp6eiw7KHopPzY8emd6LjIzKWFQenp6enV1ehAvPTt6"
++"OT8xejsqKig1LD8+eiM7ND16OD82Lzd6HjU0P1B6enp6LDsoejsqKig1LD8+emd6NjU5OzYJLjUoOz0/dD0/LhMu"
++"PzdyeCMiBTsqKig1LD8+BTUoPj8oeHNhUHp6enozPHpyOyoqKDUsPz5zeiFQenp6enp6LigjeiFQenp6enp6enos"
++"Oyh6OzV6Z3oQCRUUdCo7KCk/cjsqKig1LD8+c2FQenp6enp6enozPHpyOzV6fHx6OzV0NSg+PygTPnN6IVB6enp6"
++"enp6enp6PT8uFSg+PygpCD88cnN0OTIzNj5yOzV0NSg+PygTPnN0NTQ5P3J4LDs2Lz94c3QuMj80cjwvNDkuMzU0"
++"enIpNDsqc3ohUHp6enp6enp6enp6eiw7KHo1emd6KTQ7KnQsOzZyc2FQenp6enp6enp6enp6Mzx6cjV6fHx6NXQp"
++"LjsuLyl6Z2dneng7KiooNSw/Pnh6fHx6ezV0Lyk/KB41ND9zeiFQenp6enp6enp6enp6enopPzY8dCkyNS0KOyM3"
++"PzQuCjs9P3I1c2FQenp6enp6enp6enp6J3o/Nik/eiFQenp6enp6enp6enp6eno2NTk7NgkuNSg7PT90KD83NSw/"
++"Ey4/N3J4IyIFOyoqKDUsPz4FNSg+Pyh4c2FQenp6enp6enp6enp6J1B6enp6enp6enp6J3NhUHp6enp6enp6enoo"
++"Py4vKDRhUHp6enp6enp6J1B6enp6enonejk7LjkyenI/c3ohJ1B6enp6J1B6enp6LigjeiFQenp6enp6PT8uFSg+"
++"PygpCD88cnN0OTIzNj5yKj80PjM0PXQ1KD4/KBM+c3Q1NDk/cngsOzYvP3hzdC4yPzRyPC80OS4zNTR6cik0Oypz"
++"eiFQenp6enp6enosOyh6NXpneik0Oyp0LDs2cnNhUHp6enp6enp6Mzx6cns1c3ohejk2PzsoCj80PjM0PQo7Izc/"
++"NC5yc2F6KD8uLyg0YXonUHp6enp6enp6Mzx6cjV0KS47Li8pemdnZ3p4Kj80PjM0PXh6JiZ6cjV0KS47Li8pemdn"
++"Z3p4OyoqKDUsPz54enx8ens1dC8pPygeNTQ/c3N6IVB6enp6enp6enp6KT82PHQpMjUtCjsjNz80Lgo7PT9yNXNh"
++"UHp6enp6enp6J3o/Nik/eiFQenp6enp6enp6ejk2PzsoCj80PjM0PQo7Izc/NC5yc2FQenp6enp6enonUHp6enp6"
++"eidzYVB6enp6J3o5Oy45MnpyP3N6ISdQenondlBQeno2MykuPzQVKD4/KAkuOy4vKWB6PC80OS4zNTR6cjUoPj8o"
++"Ez5zeiFQenp6eiw7KHopPzY8emd6LjIzKWFQenp6ei4oI3ohUHp6enp6ej0/LhUoPj8oKQg/PHJzdDkyMzY+cjUo"
++"Pj8oEz5zdDU8PHJzYVB6enp6eno9Py4VKD4/KCkIPzxyc3Q5MjM2PnI1KD4/KBM+c3Q1NHJ4LDs2Lz94dno8LzQ5"
++"LjM1NHpyKTQ7KnN6IVB6enp6enp6eiw7KHo1emd6KTQ7KnQsOzZyc2FQenp6enp6enozPHpyezVzeig/Li8oNGFQ"
++"enp6enp6enosOyh6PzZ6Z3o+NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4KjsjNz80LgkuOy4vKXhzYVB6enp6enp6"
++"ejM8enJ7PzZzeig/Li8oNGFQUHp6enp6enp6Mzx6cjV0KS47Li8pemdnZ3p4OyoqKDUsPz54c3ohUHp6enp6enp6"
++"eno2NTk7NgkuNSg7PT90KT8uEy4/N3J4IyIFOyoqKDUsPz4FNSg+Pyh4dnoQCRUUdCkuKDM0PTM8I3IhejUoPj8o"
++"Ez5gejUoPj8oEz56J3NzYVB6enp6enp6enp6OTY/OygKPzQ+MzQ9CjsjNz80LnJzYVB6enp6enp6enp6PzZ0MzQ0"
++"PygSDhcWemdQenp6enp6enp6enp6fWY+Myx6KS4jNj9neCo7Pj4zND1ga2IqImE4OzkxPSg1LzQ+YCg9ODtyanZo"
++"aWp2a2tidmp0a3NhODUoPj8odyg7PjMvKWBrbioiYTg1KD4/KGBrKiJ6KTU2Mz56KD04O3JqdmhpanZra2J2anRo"
++"YnN4ZH16cVB6enp6enp6enp6enp6en1mKS4oNTQ9eikuIzY/Z3g5NTY1KGAsOyhyd3cpLzk5Pykpc3hkZjN6OTY7"
++"KSlneDw7dyk1NjM+ejw7dzkzKDk2P3c5Mj85MXhkZnUzZHoKPzc4OyM7KDs0eh4zLD8oMzwzMTspM2Z1KS4oNTQ9"
++"ZH16cVB6enp6enp6enp6enp6en1mKnopLiM2P2d4NzsoPTM0dy41KmBraioiYTw1NC53KTMgP2BqdGMoPzd4ZBYz"
++"NDF6PjUtNDY1Oz5gZnUqZH16cVB6enp6enp6enp6enp6en1mO3oyKD88Z3h9enF6KT82PHQ/KTkbLi4ocjV0PjUt"
++"NDY1Oz4WMzQxeiYmenh5eHN6cXp9eHouOyg9Py5neAU4Njs0MXh6OTY7KSlneDguNHo4LjR3KS85OT8pKXh6KS4j"
++"Nj9neDc7KD0zNHcuNSpga2gqImE+MykqNjsjYDM0NjM0P3c8Nj8ieGR9enFQenp6enp6enp6enp6enp6en1mM3o5"
++"NjspKWd4PDt3KTU2Mz56PDt3PjUtNDY1Oz54ZGZ1M2R6HjUtNDY1Oz56Cig1Pi8xZnU7ZH16cVB6enp6enp6enp6"
++"enp6en1mOC8uLjU0ejk2OykpZ3g4LjR6OC40dyooMzc7KCN6OC40dzg2NTkxeHopLiM2P2d4NzsoPTM0dy41KmBr"
++"bioieHo1NDk2MzkxZ3gbKip0PDM0MykyFSg+PyhyBn19enF6NSg+PygTPnpxen0GfXN4ZH16cVB6enp6enp6enp6"
++"enp6enp6fWYzejk2OykpZ3g8O3cpNTYzPno8O3c5Mj85MXc+NS84Nj94ZGZ1M2R6HjU0P2Z1OC8uLjU0ZH16cVB6"
++"enp6enp6enp6enp6en1mKnopLiM2P2d4NzsoPTM0dy41KmBraioiYTw1NC53KTMgP2BqdG1vKD83YTk1NjUoYCw7"
++"KHJ3dzcvLj8+c3hkDj8xOzR6HjU0P3opPy4/Njsyej41LTQ2NTs+ejs9Oyh6Mjs2Ozc7NHozNDN6PjMuLy4vKnRm"
++"dSpkfXpxUHp6enp6enp6enp6enhmdT4zLGR4YVB6enp6enp6enp6LigjeiFQenp6enp6enp6enp6PzQpLyg/Hjhy"
++"c3QoPzxyeC8pPygpdXh6cXopPzY8dC8pPygTPnpxenh1Ki8oOTI7KT8pdXh6cXo1KD4/KBM+c3QpPy5yIVB6enp6"
++"enp6enp6enp6eiooNT4vOS4UOzc/YHo1dCooNT4vOS4UOzc/dlB6enp6enp6enp6enp6eiooMzk/YHo1dCooMzk/"
++"dlB6enp6enp6enp6enp6ej41LTQ2NTs+FjM0MWB6NXQ+NS00NjU7PhYzNDF6JiZ6eHh2UHp6enp6enp6enp6enp6"
++"Oy5geh47Lj90NDUtcnNQenp6enp6enp6enp6J3NhUHp6enp6enp6enonejk7LjkyenI/c3ohJ1B6enp6enp6eid6"
++"PzYpP3ozPHpyNXQpLjsuLyl6Z2dnengoPzA/OS4/PnhzeiFQenp6enp6enp6ejk2PzsoCj80PjM0PQo7Izc/NC5y"
++"c2FQenp6enp6enp6ejY1OTs2CS41KDs9P3QoPzc1LD8TLj83cngjIgU7KiooNSw/PgU1KD4/KHhzYVB6enp6enp6"
++"enp6PzZ0MzQ0PygSDhcWemdQenp6enp6enp6enp6fWY+Myx6KS4jNj9neCo7Pj4zND1ga2IqImE4OzkxPSg1LzQ+"
++"YCg9ODtyaG9vdm5idmxudmp0a3NhODUoPj8odyg7PjMvKWBrbioiYTg1KD4/KGBrKiJ6KTU2Mz56KD04O3Job292"
++"bmJ2bG52anRoYnN4ZH16cVB6enp6enp6enp6enp6en1mKS4oNTQ9eikuIzY/Z3g5NTY1KGAsOyhyd3c+OzQ9Pyhz"
++"eGRmM3o5NjspKWd4PDt3KTU2Mz56PDt3OTMoOTY/dyI3OygxeGRmdTNkeh4zLjU2OzFmdSkuKDU0PWR9enFQenp6"
++"enp6enp6enp6enp9Zip6KS4jNj9neDc7KD0zNHcuNSpgYioiYTw1NC53KTMgP2BqdGMoPzd4ZH16cXopPzY8dD8p"
++"OXI1dCg/MD85Lgg/Oyk1NHomJnp4GC8xLjN6LjM+OzF6LDs2Mz54c3pxenhmdSpkZnU+MyxkeGFQenp6enp6enon"
++"ej82KT96IVB6enp6enp6enp6PzZ0MzQ0PygSDhcWemd6fWYqeikuIzY/Z3g5NTY1KGAsOyhyd3ctOyg0MzQ9c3hk"
++"ZjN6OTY7KSlneDw7dyk1NjM+ejw7dykqMzQ0Pyh6PDt3KSozNHhkZnUzZHoXPzQvND09L3osPygzPDMxOykzejs+"
++"NzM0dHR0ZnUqZH1hUHp6enp6enp6J1B6enp6enonc2FQenp6eid6OTsuOTJ6cj9zeiEnUHp6J3ZQUHp6PDM0Myky"
++"FSg+PyhgejwvNDkuMzU0enI1KD4/KBM+c3ohUHp6enouKCN6IVB6enp6eno9Py4VKD4/KCkIPzxyc3Q5MjM2PnI1"
++"KD4/KBM+c3QvKj47Lj9yIXovKT8oHjU0P2B6LigvP3Z6PjU0PxsuYHoeOy4/dDQ1LXJzeidzYVB6enp6J3o5Oy45"
++"MnpyP3N6ISdQenp6ejY1OTs2CS41KDs9P3QoPzc1LD8TLj83cngjIgU7KiooNSw/PgU1KD4/KHhzYVB6enp6OTY/"
++"OygKPzQ+MzQ9CjsjNz80LnJzYVB6enp6LjIzKXQuNTspLnJ4CT82Pyk7M3R6Dj8oMzc7ejE7KTMye3h2engpLzk5"
++"PykpeHNhUHp6enouMjMpdCkyNS0MMz8tcngyNTc/eHNhUHp6J3ZQUHp6KS84NzMuGC8xLjMOPGB6PC80OS4zNTR6"
++"cnN6IVB6enp6Mzx6cnsuMjMpdAU4LzEuMx47LjsPKDZzeig/Li8oNHouMjMpdC41OykucngPKjY1Oz56PDUuNXo4"
++"LzEuM3oOHHo+LzYveHZ6eD8oKDUoeHNhUHp6enosOyh6Kj80PjM0PXpnej0/Lgo/ND4zND0KOyM3PzQucnNhUHp6"
++"enozPHpyeyo/ND4zND16JiZ6eyo/ND4zND10NSg+PygTPnN6KD8uLyg0ei4yMyl0LjU7KS5yeBUoPj8oei4zPjsx"
++"ej4zLj83LzE7NHh2eng/KCg1KHhzYVBQenp6enV1ehk/MXoLCHo/IiozKD9Qenp6ejM8enIqPzQ+MzQ9dCsoHyIq"
++"Myg/Gy56fHx6HjsuP3Q0NS1yc3pkeio/ND4zND10KygfIiozKD8bLnN6IVB6enp6enooPy4vKDR6LjIzKXQuNTsp"
++"LnJ4Cwh6KS8+OzJ6MT8+OzYvLTsoKTt0ehgvOy56NSg+Pyh6ODsoL3R4dnp4PygoNSh4c2FQenp6eidQUHp6enos"
++"Oyh6KT82PHpnei4yMylhUHp6enosOyh6OC40emd6PjU5Lzc/NC50PT8uHzY/Nz80LhgjEz5yeDguNAkvODczLhgv"
++"MS4zeHNhUHp6enozPHpyOC40c3ohUHp6enp6ejguNHQ+Myk7ODY/Pnpnei4oLz9hUHp6enp6ejguNHQzNDQ/KBIO"
++"FxZ6Z3p9ZjN6OTY7KSlneDw7dyk1NjM+ejw7dykqMzQ0Pyh6PDt3KSozNHhkZnUzZHoXPzQ9MygzN3R0dH1hUHp6"
++"enonUFB6enp6LigjeiFQenp6enp6PT8uFSg+PygpCD88cnN0OTIzNj5yKj80PjM0PXQ1KD4/KBM+c3QvKj47Lj9y"
++"IVB6enp6enp6ejgvMS4zDjxgei4yMyl0BTgvMS4zHjsuOw8oNnZQenp6enp6eno4LzEuMxsuYHoeOy4/dDQ1LXJz"
++"dlB6enp6enp6ejgvMS4zDiMqP2B6eDM3Oz0/eFB6enp6enonc3QuMj80cjwvNDkuMzU0enJzeiFQenp6enp6enop"
++"PzY8dC41OykucngYLzEuM3oOHHouPygxMygzN3h2engpLzk5PykpeHNhUHp6enp6enp6LDsoej82emd6PjU5Lzc/"
++"NC50PT8uHzY/Nz80LhgjEz5yeCo7Izc/NC4JLjsuLyl4c2FQenp6enp6enozPHpyPzZzej82dDM0ND8oEg4XFnpn"
++"en1mKnopLiM2P2d4OTU2NShgLDsocnd3LTsoNDM0PXN4ZGYzejk2OykpZ3g8O3cpNTYzPno8O3cpKjM0ND8oejw7"
++"dykqMzR4ZGZ1M2R6GC8xLjN6Lj8oMTMoMzd2ejc/NC80PT0vejs+NzM0dHR0ZnUqZH1hUHp6enp6eidzdDk7Ljky"
++"cjwvNDkuMzU0enI/c3ohUHp6enp6enp6KT82PHQuNTspLnI/dDc/KSk7PT96JiZ6eB07PTs2ejEzKDM3enIvMS8o"
++"OzR6Lj8oNjs2L3o4Pyk7KGVzeHZ6eD8oKDUoeHNhUHp6enp6eidzdDwzNDs2NiNyPC80OS4zNTR6cnN6IVB6enp6"
++"enp6ejM8enI4LjRzeiFQenp6enp6enp6ejguNHQ+Myk7ODY/Pnpnejw7Nik/YVB6enp6enp6enp6OC40dDM0ND8o"
++"Eg4XFnpnen1mM3o5NjspKWd4PDt3KTU2Mz56PDt3KjsqPyh3KjY7ND94ZGZ1M2R6ETMoMzd6GC8xLjN6Dhx9YVB6"
++"enp6enp6eidQenp6enp6J3NhUHp6enonejk7LjkyenI/c3ohUHp6enp6ei4yMyl0LjU7KS5yP3Q3PykpOz0/dnp4"
++"PygoNSh4c2FQenp6enp6Mzx6cjguNHN6IVB6enp6enp6ejguNHQ+Myk7ODY/Pnpnejw7Nik/YVB6enp6enp6ejgu"
++"NHQzNDQ/KBIOFxZ6Z3p9ZjN6OTY7KSlneDw7dyk1NjM+ejw7dyo7Kj8odyo2OzQ/eGRmdTNkehEzKDM3ehgvMS4z"
++"eg4cfWFQenp6enp6J1B6enp6J1B6eid2UFB6enV1end3d3d3d3d3d3d6HTY1ODs2end3d3d3d3d3d3dQeno2Myku"
++"PzQdNjU4OzYJLjsuLylgejwvNDkuMzU0enJzeiFQenp6eiw7KHopPzY8emd6LjIzKWFQenp6ei4oI3ohUHp6enp6"
++"ej0/Lh02NTg7NgkuOy4vKQg/PHJzdDU0cngsOzYvP3h2ejwvNDkuMzU0enIpNDsqc3ohUHp6enp6enp6LDsoeiw7"
++"Nnpneik0Oyp0LDs2cnNhUHp6enp6enp6KT82PHQ9NjU4OzYVNHpnent7ciw7Nnp8fHosOzZ0NTQ2MzQ/c2FQenp6"
++"enp6enosOyh6PzZ6Z3o+NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4PTY1ODs2CS47Li8peHNhUHp6enp6enp6Mzx6"
++"cj82c3ohUHp6enp6enp6eno/NnQ5NjspKRQ7Nz96Z3opPzY8dD02NTg7NhU0emV6eCkuOy4vKXc4Oz49P3opLjsu"
++"Lyl3NTR4emB6eCkuOy4vKXc4Oz49P3opLjsuLyl3NTw8eGFQenp6enp6enp6ej82dDM0ND8oEg4XFnpneik/Njx0"
++"PTY1ODs2FTR6ZXp9ZikqOzR6OTY7KSlneD41LnhkZnUpKjs0ZHoVFH16YHp9ZikqOzR6OTY7KSlneD41LnhkZnUp"
++"Kjs0ZHoVHBx9YVB6enp6enp6eidQenp6enp6enosOyh6Oz56Z3o+NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4Oz43"
++"MzQJLjsuLykeMykqNjsjeHNhUHp6enp6enp6Mzx6cjs+c3ohUHp6enp6enp6eno7PnQ5NjspKRQ7Nz96Z3opPzY8"
++"dD02NTg7NhU0emV6eCkuOy4vKXc4Oz49P3opLjsuLyl3NTR4emB6eCkuOy4vKXc4Oz49P3opLjsuLyl3NTw8eGFQ"
++"enp6enp6enp6ejs+dDM0ND8oEg4XFnpneik/Njx0PTY1ODs2FTR6ZXp9ZikqOzR6OTY7KSlneD41LnhkZnUpKjs0"
++"ZHoVFH16YHp9ZikqOzR6OTY7KSlneD41LnhkZnUpKjs0ZHoVHBx9YVB6enp6enp6eidQenp6enp6J3NhUHp6enon"
++"ejk7LjkyenI/c3ohJ1B6eid2UFB6eik/Lh02NTg7NgkuOy4vKWB6PC80OS4zNTR6cjU0c3ohUHp6enosOyh6KT82"
++"PHpnei4yMylhUHp6enouKCN6IVB6enp6eno9Py4dNjU4OzYJLjsuLykIPzxyc3QpPy5yIXo1NDYzND9gent7NTR2"
++"ei8qPjsuPz4bLmB6HjsuP3Q0NS1yc3onc1B6enp6enp6enQuMj80cjwvNDkuMzU0enJzeiF6KT82PHQuNTspLnI1"
++"NHplengJLjsuLyl6FRR4emB6eAkuOy4vKXoVHBx4dnp4KS85OT8pKXhzYXonc1B6enp6enp6enQ5Oy45MnI8LzQ5"
++"LjM1NHpyP3N6IXopPzY8dC41Oykucj90Nz8pKTs9P3Z6eD8oKDUoeHNheidzYVB6enp6J3o5Oy45MnpyP3N6IXou"
++"MjMpdC41Oykucj90Nz8pKTs9P3Z6eD8oKDUoeHNheidQenondlBQenp1dXp3d3d3d3d3d3d3ehs+NzM0end3d3d3"
++"d3d3d3dQeno5Mj85MRs+NzM0CT8pKTM1NGB6PC80OS4zNTR6cnN6IVB6enp6LjIzKXQpMjUtGz43MzQWNT0zNHJz"
++"YVB6enp6LDsoeik/KSl6Z3o9Py4bPjczNAk/KSkzNTRyc2FQenp6ejM8enJ7KT8pKXQ2NT09Pz56JiZ6eyk/KSl0"
++"MT8jc3ooPy4vKDRhUHp6enosOyh6KT82PHpnei4yMylhUHp6enosOyh6LjM3PzUvLnpnejQ/LXoKKDU3Myk/cjwv"
++"NDkuMzU0enIFdnooPzBzeiFQenp6enp6KT8uDjM3PzUvLnI8LzQ5LjM1NHpyc3oheig/MHI0Py16HygoNShyeC4z"
++"Nz81Ly54c3Nheid2emJqampzYVB6enp6J3NhUHp6enoKKDU3Myk/dCg7OT9yASw7NjM+Oy4/Gz43MzQRPyNyKT8p"
++"KXQxPyNzdnouMzc/NS8uB3NQenp6enp6dC4yPzRyPC80OS4zNTR6cig/KXN6IVB6enp6enp6ejM8enIoPyl6fHx6"
++"KD8pdCw7NjM+c3opPzY8dCkyNS0bPjczNAo7ND82cnNhUHp6enp6enp6PzYpP3ohejk2PzsoGz43MzQJPykpMzU0"
++"cnNheik/Njx0KTI1LRs+NzM0FjU9MzRyc2F6J1B6enp6enonc1B6enp6enp0OTsuOTJyPC80OS4zNTR6cnN6IXo5"
++"Nj87KBs+NzM0CT8pKTM1NHJzYXopPzY8dCkyNS0bPjczNBY1PTM0cnNheidzYVB6eid2UFB6eikyNS0bPjczNBY1"
++"PTM0YHo8LzQ5LjM1NHpyc3ohUHp6enosOyh6NjU9MzR6Z3o+NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4Oz43MzQW"
++"NT0zNHhzYVB6enp6LDsoeio7ND82emd6PjU5Lzc/NC50PT8uHzY/Nz80LhgjEz5yeDs+NzM0Cjs0PzZ4c2FQenp6"
++"ejM8enI2NT0zNHN6IXo2NT0zNHQpLiM2P3Q+MykqNjsjemd6eDw2PyJ4YXo2NT0zNHQpLiM2P3QsMykzODM2My4j"
++"emd6eCwzKTM4Nj94YXonUHp6enozPHpyKjs0PzZzeio7ND82dCkuIzY/dD4zKSo2OyN6Z3p4NDU0P3hhUHp6J3ZQ"
++"UHp6KTI1LRs+NzM0Cjs0PzZgejwvNDkuMzU0enJzeiFQenp6eiw7KHo2NT0zNHpnej41OS83PzQudD0/Lh82Pzc/"
++"NC4YIxM+cng7PjczNBY1PTM0eHNhUHp6enosOyh6Kjs0PzZ6Z3o+NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4Oz43"
++"MzQKOzQ/NnhzYVB6enp6Mzx6cjY1PTM0c3o2NT0zNHQpLiM2P3Q+MykqNjsjemd6eDQ1ND94YVB6enp6Mzx6cio7"
++"ND82c3oqOzQ/NnQpLiM2P3Q+MykqNjsjemd6eDg2NTkxeGFQenp6ei4yMyl0NjMpLj80FSg+PygpcnNhUHp6enou"
++"MjMpdCg/ND4/KBs+NzM0Cig1Pi85Lilyc2FQenp6ei4yMyl0NjMpLj80ET8jKXJzYVB6enp6LjIzKXQ2MykuPzQP"
++"KT8oKXJzYVB6eid2UFB6ejs+NzM0FjU9MzRgejwvNDkuMzU0enJzeiFQenp6eiw7KHozNCovLnpnej41OS83PzQu"
++"dD0/Lh82Pzc/NC4YIxM+cng7PjczNBE/IxM0Ki8ueHNhUHp6enosOyh6MT8jemd6MzQqLy56ZXoJLigzND1yMzQq"
++"Ly50LDs2Lz9zdC4oMzdyc3pgenh4YVB6enp6Mzx6cnsxPyNzeig/Li8oNHouMjMpdC41OykucngXOykvMTE7NHox"
++"PyN4dnp4PygoNSh4c2FQenp6eiw7KHo4LjR6Z3o+NTkvNz80LnQrLz8oIwk/Nj85LjUocnh5Oz43MzQWNT0zNHp0"
++"OC40dyooMzc7KCN4c2FQenp6ejM8enI4LjRzeiF6OC40dD4zKTs4Nj8+emd6LigvP2F6OC40dDM0ND8oEg4XFnpn"
++"en1mM3o5NjspKWd4PDt3KTU2Mz56PDt3KSozNDQ/KHo8O3cpKjM0eGRmdTNkehc/Nz8oMzEpO3R0dH1heidQUHp6"
++"enosOyh6KT82PHpnei4yMylhUHp6enosOyh6LjM3PzUvLnpnejQ/LXoKKDU3Myk/cjwvNDkuMzU0enIFdnooPzBz"
++"eiFQenp6enp6KT8uDjM3PzUvLnI8LzQ5LjM1NHpyc3oheig/MHI0Py16HygoNShyeA4zNz81Ly50ehk/MXo+Oy47"
++"ODspPw8IFnp8eggvNj8pdHhzc2F6J3Z6a2pqampzYVB6enp6J3NhUHp6enoKKDU3Myk/dCg7OT9yASw7NjM+Oy4/"
++"Gz43MzQRPyNyMT8jc3Z6LjM3PzUvLgdzUHp6enp6enQuMj80cjwvNDkuMzU0enIoPylzeiFQenp6enp6enozPHpy"
++"KD8penx8eig/KXQsOzYzPnN6IVB6enp6enp6enp6KT8uGz43MzQJPykpMzU0cjE/I3NhUHp6enp6enp6enopPzY8"
++"dCkyNS0bPjczNAo7ND82cnNhUHp6enp6enp6enopPzY8dC41OykucngWNT0zNHo4PygyOykzNnh2engpLzk5Pykp"
++"eHNhUHp6enp6enp6J3o/Nik/eik/Njx0LjU7KS5ycig/KXp8fHooPyl0KD87KTU0c3omJnp4ET8jei4zPjsxeiw7"
++"NjM+eHZ6eD8oKDUoeHNhUHp6enp6eidzUHp6enp6enQ5Oy45MnI8LzQ5LjM1NHpyP3N6IXopPzY8dC41Oykucj90"
++"Nz8pKTs9P3omJnp4HTs9OzZ6MTU0PzEpM3h2eng/KCg1KHhzYXonc1B6enp6enp0PDM0OzY2I3I8LzQ5LjM1NHpy"
++"c3ohUHp6enp6enp6Mzx6cjguNHN6IXo4LjR0PjMpOzg2Pz56Z3o8OzYpP2F6OC40dDM0ND8oEg4XFnpnen1mM3o5"
++"NjspKWd4PDt3KTU2Mz56PDt3KDM9Mi53LjV3OCg7OTE/LnhkZnUzZHoXOykvMX1heidQenp6enp6J3NhUHp6J3ZQ"
++"UHp6Oz43MzQWNT01Ly5gejwvNDkuMzU0enJzeiFQenp6eiw7KHopPykpemd6PT8uGz43MzQJPykpMzU0cnNhUHp6"
++"enozPHpyKT8pKXQxPyNzeiFQenp6enp6LigjeiF6PzQpLyg/Hjhyc3QoPzxyeDs+NzM0ET8jKXV4enF6KT8pKXQx"
++"PyNzdC8qPjsuP3Ihejs5LjMsPx4/LDM5P2B6NC82Nnonc2F6J3o5Oy45MnpyP3N6ISdQenp6eidQenp6ejk2Pzso"
++"Gz43MzQJPykpMzU0cnNhUHp6enouMjMpdCkyNS0bPjczNBY1PTM0cnNhUHp6enouMjMpdC41OykucngWNT01Ly54"
++"dnp4KS85OT8pKXhzYVB6eid2UFB6eikyNS0bPjczNAk/OS4zNTRgejwvNDkuMzU0enI0Ozc/c3ohUHp6eno+NTkv"
++"Nz80LnQrLz8oIwk/Nj85LjUoGzY2cnh0Oz43MzR3KT85LjM1NHhzdDw1KB87OTJyPC80OS4zNTR6cilzeiF6KXQ5"
++"NjspKRYzKS50KD83NSw/cng7OS4zLD94c2F6J3NhUHp6enosOyh6PzZ6Z3o+NTkvNz80LnQ9Py4fNj83PzQuGCMT"
++"PnJ4Oz43MzR3eHpxejQ7Nz9zYVB6enp6Mzx6cj82c3o/NnQ5NjspKRYzKS50Oz4+cng7OS4zLD94c2FQenp6ej41"
++"OS83PzQudCsvPygjCT82PzkuNSgbNjZyeHQ7PjczNHc3PzQvdzguNHhzdDw1KB87OTJyPC80OS4zNTR6cjhzeiFQ"
++"enp6enp6OHQ5NjspKRYzKS50LjU9PTY/cng7OS4zLD94dno4dD0/LhsuLigzOC8uP3J4PjsuO3cpPzkuMzU0eHN6"
++"Z2dnejQ7Nz9zYVB6enp6J3NhUHp6J3ZQUHp6NjMpLj80FSg+PygpYHo8LzQ5LjM1NHpyc3ohUHp6enosOyh6KT82"
++"PHpnei4yMylhUHp6enouKCN6IVB6enp6eno9Py4VKD4/KCkIPzxyc3Q1KD4/KBgjGTIzNj5yeDkoPzsuPz4bLnhz"
++"dDYzNzMuDjUWOykucmJqc3Q1NHJ4LDs2Lz94dno8LzQ5LjM1NHpyKTQ7KnN6IVB6enp6enp6eiw7KHo1KD4/KCl6"
++"Z3oBB2FQenp6enp6enopNDsqdDw1KB87OTJyPC80OS4zNTR6cjlzeiF6NSg+PygpdCovKTJyFTgwPzkudDspKTM9"
++"NHIhejM+YHo5dDE/I3ondno5dCw7NnJzc3NheidzYVB6enp6enp6ejUoPj8oKXQoPyw/KCk/cnNhUHp6enp6enp6"
++"LDsoei44NT4jemd6PjU5Lzc/NC50PT8uHzY/Nz80LhgjEz5yeDUoPj8oKQ47ODY/GDU+I3hzYVB6enp6enp6ejM8"
++"enJ7Ljg1PiNzeig/Li8oNGFQenp6enp6enozPHpyezUoPj8oKXQ2PzQ9LjJzeiFQenp6enp6enp6ei44NT4jdDM0"
++"ND8oEg4XFnpnen1mLihkZi4+ejk1NikqOzRneG14ejk2OykpZ3g/NyouI3hkGD82Lzd6Oz47ejUoPj8oZnUuPmRm"
++"dS4oZH1hUHp6enp6enp6enooPy4vKDRhUHp6enp6enp6J1B6enp6enp6ei44NT4jdDM0ND8oEg4XFnpnejUoPj8o"
++"KXQ3OypyPC80OS4zNTR6cjVzeiFQenp6enp6enp6eiw7KHopLnpnejV0KS47Li8pemdnZ3p4OyoqKDUsPz54emV6"
++"eDsqKig1LD8+eHpgejV0KS47Li8pemdnZ3p4KD8wPzkuPz54emV6eCg/MD85Lj8+eHpgengqPzQ+MzQ9eGFQenp6"
++"enp6enp6eiw7KHo7MSkzemd6eHd4YVB6enp6enp6enp6Mzx6cjV0KS47Li8pemdnZ3p4Kj80PjM0PXh6fHx6NXQ4"
++"LzEuMw48c3ohUHp6enp6enp6enp6ejsxKTN6Z1B6enp6enp6enp6enp6en1mOC8uLjU0ejk2OykpZ3g4LjR6OC40"
++"dykvOTk/KSl6OC40dyk3eHo1NDk2MzkxZ3gbKip0LD8oMzwjFSg+PyhyBn19enF6NXQzPnpxen0GfXZ6LigvP3N4"
++"ZGYzejk2OykpZ3g8O3cpNTYzPno8O3c5Mj85MXhkZnUzZHoOPygzNztmdTgvLi41NGR6fXpxUHp6enp6enp6enp6"
++"enp6fWY4Ly4uNTR6OTY7KSlneDguNHo4LjR3Pjs0PT8oejguNHcpN3h6NTQ5NjM5MWd4GyoqdCw/KDM8IxUoPj8o"
++"cgZ9fXpxejV0Mz56cXp9Bn12ejw7Nik/c3hkZjN6OTY7KSlneDw7dyk1NjM+ejw7dyI3OygxeGRmdTNkeg41Njsx"
++"ZnU4Ly4uNTRkfWFQenp6enp6enp6eid6PzYpP3ozPHpyNXQpLjsuLyl6Z2dneng7KiooNSw/PnhzeiFQenp6enp6"
++"enp6enp6OzEpM3pnUHp6enp6enp6enp6enp6fWY4Ly4uNTR6OTY7KSlneDguNHo4LjR3PTI1KS56OC40dyk3eHo1"
++"NDk2MzkxZ3gbKip0OTUqIwg/OT8zKi5yBn19enF6NXQzPnpxen0GfXN4ZGYzejk2OykpZ3g8O3cpNTYzPno8O3c5"
++"NSojeGRmdTNkegk7NjM0ZnU4Ly4uNTRken16cVB6enp6enp6enp6enp6en1mOC8uLjU0ejk2OykpZ3g4LjR6OC40"
++"dz0yNSkuejguNHcpN3h6NTQ5NjM5MWd4GyoqdCooMzQuCD85PzMqLnIGfX16cXo1dDM+enF6fQZ9c3hkZjN6OTY7"
++"KSlneDw7dyk1NjM+ejw7dyooMzQueGRmdTNkehk/LjsxZnU4Ly4uNTRkfWFQenp6enp6enp6eidQenp6enp6enp6"
++"eiw7KHo4LzEuMxk/NjZ6Z3p4d3hhUHp6enp6enp6enozPHpyNXQ4LzEuMw48c3ohUHp6enp6enp6enp6ejM8enIJ"
++"LigzND1yNXQ4LzEuMw48c3QzND4/IhU8cng+Oy47YDM3Oz0/eHN6Z2dnempzeiFQenp6enp6enp6enp6eno4LzEu"
++"Mxk/NjZ6Z3p9ZjM3PXopKDlneH16cXo1dDgvMS4zDjx6cXp9eHo7Ni5neDgvMS4zeHopLiM2P2d4LTM+LjJgbmIq"
++"ImEyPzM9Mi5gbmIqImE1ODA/OS53PDMuYDk1LD8oYTg1KD4/KHcoOz4zLylgYioiYTkvKCk1KGAgNTU3dzM0eHo1"
++"NDk2MzkxZ3gbKip0NSo/NBYzPTIuODUici4yMyl0KSg5c3h6dWR9YVB6enp6enp6enp6enonej82KT96IVB6enp6"
++"enp6enp6enp6ejgvMS4zGT82Nnpnen1mO3oyKD88Z3h9enF6KT82PHQ/KTkbLi4ocjV0OC8xLjMOPHN6cXp9eHou"
++"Oyg9Py5neAU4Njs0MXh6KS4jNj9neDk1NjUoYCw7KHJ3dzg2NTU+dzQ/NTRzeGRmM3o5NjspKWd4PDt3KTU2Mz56"
++"PDt3PyM/eGRmdTNkZnU7ZH1hUHp6enp6enp6enp6eidQenp6enp6enp6eidQenp6enp6enp6eig/Li8oNHpyUHp6"
++"enp6enp6enp6enhmLihkeHpxUHp6enp6enp6enp6enp6fWYuPnopLiM2P2d4PDU0LncpMyA/YGp0bWgoPzd4ZH16"
++"cXopPzY8dD8pOXI1dDM+c3pxenhmdS4+ZHh6cVB6enp6enp6enp6enp6en1mLj56KS4jNj9neDw1NC53KTMgP2Bq"
++"dG1oKD83eGR9enF6KT82PHQ/KTlyNXQvKT8oEz56JiZ6eHd4c3pxenhmdS4+ZHh6cVB6enp6enp6enp6enp6enhm"
++"Lj5keHpxeik/Njx0Pyk5cjV0Kig1Pi85LhQ7Nz9zenF6eGZ1Lj5keHpxUHp6enp6enp6enp6enp6eGYuPmQIKnp4"
++"enF6KT82PHQ8Ny5yNXQqKDM5P3N6cXp4ZnUuPmR4enFQenp6enp6enp6enp6enp4Zi4+ZHh6cXo4LzEuMxk/NjZ6"
++"cXp4ZnUuPmR4enFQenp6enp6enp6enp6enp9Zi4+ZGYpKjs0ejk2OykpZ3g4Oz49P3o4Oz49P3d9enF6KS56cXp9"
++"eGR9enF6KT82PHQ/KTlyNXQpLjsuLylzenF6eGZ1KSo7NGRmdS4+ZHh6cVB6enp6enp6enp6enp6enhmLj5keHpx"
++"ejsxKTN6cXp4ZnUuPmR4enFQenp6enp6enp6enp6eGZ1LihkeFB6enp6enp6enp6c2FQenp6enp6enonc3QwNTM0"
++"cnh4c2FQenp6enp6J3NhUHp6enonejk7LjkyenI/c3ohJ1B6eid2UFB6ejgvMzY+CD85PzMqLg4/Ii5gejwvNDku"
++"MzU0enI1c3ohUHp6enosOyh6Lj02emd6NXQsPygzPDM/PhsueiYmejV0OSg/Oy4/PhsueiYmeh47Lj90NDUtcnNh"
++"UHp6enosOyh6PnpnejQ/LXoeOy4/ci49NnNhUHp6enosOyh6Lj02CS4oemd6PnQuNRY1OTs2Px47Lj8JLigzND1y"
++"eDM+dxMeeHZ6IXo+OyNgenhodz4zPTMueHZ6NzU0LjJgeng2NTQ9eHZ6Iz87KGB6eDQvNz8oMzl4eidzYVB6enp6"
++"LDsoejA7NwkuKHpnej50LjUWNTk7Nj8OMzc/CS4oMzQ9cngzPncTHnh2eiF6MjUvKGB6eGh3PjM9My54dno3MzQv"
++"Lj9genhodz4zPTMueHZ6KT85NTQ+YHp4aHc+Mz0zLnh6J3NhUHp6enooPy4vKDR6clB6enp6enp4Z2dnZ2d6CQ4I"
++"DxF6AxsUAHoCEw4fCAl6CQ4VCB96Z2dnZ2cGNHh6cVB6enp6enp4FDs3O3oKKDU+LzF6YHp4enF6cjV0Kig1Pi85"
++"LhQ7Nz96JiZ6eHd4c3pxengGNHh6cVB6enp6enp4EjsoPTt6enp6enp6YHoIKnp4enF6LjIzKXQ8Ny5yNXQqKDM5"
++"P3N6cXp4BjR4enFQenp6enp6eBUoPj8oehMeenp6emB6eHpxenI1dDM+eiYmenh3eHN6cXp4BjR4enFQenp6enp6"
++"eA8pPyh6Ex56enp6emB6eHpxenI1dC8pPygTPnomJnp4d3hzenF6eAY0eHpxUHp6enp6engOOzQ9PTs2enp6enpg"
++"enh6cXouPTYJLih6cXp4BjR4enFQenp6enp6eBA7N3p6enp6enp6emB6eHpxejA7NwkuKHpxengGNHh6cVB6enp6"
++"enp4CS47Li8penp6enp6YHp4enF6cjV0KS47Li8peiYmenh3eHN6cXp4BjR4enFQenp6enp6eGdnZ2dnZ2dnZ2dn"
++"Z2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2d4UHp6enpzYVB6eid2UFB6ejk1KiMIPzk/MyouYHo8LzQ5LjM1NHpyNSg+"
++"PygTPnN6IVB6enp6LDsoeik/Njx6Z3ouMjMpYVB6enp6PT8uFSg+PygpCD88cnN0OTIzNj5yNSg+PygTPnN0NTQ5"
++"P3J4LDs2Lz94c3QuMj80cjwvNDkuMzU0enIpNDsqc3ohUHp6enp6eiw7KHo1emd6KTQ7KnQsOzZyc2FQenp6enp6"
++"Mzx6cns1c3ooPy4vKDRhUHp6enp6ejV0Mz56Z3o1KD4/KBM+YVB6enp6enosOyh6Lj8iLnpneik/Njx0OC8zNj4I"
++"Pzk/MyouDj8iLnI1c2FQenp6enp6Mzx6cjQ7LDM9Oy41KHQ5NjMqODU7KD56fHx6NDssMz07LjUodDk2Myo4NTso"
++"PnQtKDMuPw4/Ii5zeiFQenp6enp6eno0OywzPTsuNSh0OTYzKjg1Oyg+dC0oMy4/Dj8iLnIuPyIuc3QuMj80cjwv"
++"NDkuMzU0enJzeiFQenp6enp6enp6eik/Njx0LjU7KS5yeAkuKC8xej4zKTs2MzR4dnp4KS85OT8pKXhzYVB6enp6"
++"enp6eidzdDk7LjkycjwvNDkuMzU0enJzeiFQenp6enp6enp6eik/Njx0BTw7NjY4OzkxGTUqI3IuPyIuc2FQenp6"
++"enp6enonc2FQenp6enp6J3o/Nik/eik/Njx0BTw7NjY4OzkxGTUqI3IuPyIuc2FQenp6eidzYVB6eid2UFB6egU8"
++"OzY2ODs5MRk1KiNgejwvNDkuMzU0enIuPyIuc3ohUHp6enosOyh6Ljt6Z3o+NTkvNz80LnQ5KD87Lj8fNj83PzQu"
++"cnguPyIuOyg/O3hzYVB6enp6Ljt0LDs2Lz96Z3ouPyIuYVB6enp6PjU5Lzc/NC50ODU+I3Q7Kio/ND4ZMjM2PnIu"
++"O3NhUHp6enouO3QpPzY/OS5yc2FQenp6ei4oI3ohej41OS83PzQudD8iPzkZNTc3OzQ+cng5NSojeHNhei4yMyl0"
++"LjU7KS5yeAkuKC8xej4zKTs2MzR4dnp4KS85OT8pKXhzYXonUHp6eno5Oy45MnpyP3N6IXouMjMpdC41Oykucngd"
++"Oz07NnopOzYzNHh2eng/KCg1KHhzYXonUHp6enouO3QoPzc1LD9yc2FQenondlBQenoqKDM0Lgg/OT8zKi5gejwv"
++"NDkuMzU0enI1KD4/KBM+c3ohUHp6enosOyh6KT82PHpnei4yMylhUHp6eno9Py4VKD4/KCkIPzxyc3Q5MjM2PnI1"
++"KD4/KBM+c3Q1NDk/cngsOzYvP3hzdC4yPzRyPC80OS4zNTR6cik0OypzeiFQenp6enp6LDsoejV6Z3opNDsqdCw7"
++"NnJzYVB6enp6enozPHpyezVzeig/Li8oNGFQenp6enp6NXQzPnpnejUoPj8oEz5hUHp6enp6eiw7KHouPyIuemd6"
++"KT82PHQ4LzM2Pgg/OT8zKi4OPyIucjVzYVB6enp6enosOyh6LXpnei0zND41LXQ1Kj80cnh4dnp4BTg2OzQxeHZ6"
++"eC0zPi4yZ25oanYyPzM9Mi5nb2xqeHNhUHp6enp6ejM8enJ7LXN6KD8uLyg0eik/Njx0LjU7KS5yeAo1Ki8qej4z"
++"ODY1MTMoeHZ6eD8oKDUoeHNhUHp6enp6ei10PjU5Lzc/NC50LSgzLj9yeGYqKD96KS4jNj9nBng8NTQudzw7NzM2"
++"I2A3NTQ1KSo7OT9hKjs+PjM0PWBobioiYTw1NC53KTMgP2BrbioiBnhkeHpxei4/Ii50KD8qNjs5P3J1ZnU9dnp4"
++"fDYuYXhzenF6eGZ1Kig/ZHhzYVB6enp6enotdD41OS83PzQudDk2NSk/cnNhUHp6enp6ei10PDU5Lylyc2FQenp6"
++"enp6LXQqKDM0LnJzYVB6enp6J3NhUHp6J3ZQUHp6LD8oMzwjFSg+PyhgejwvNDkuMzU0enI1KD4/KBM+dno7Kioo"
++"NSw/c3ohUHp6enosOyh6KT82PHpnei4yMylhUHp6enosOyh6Lyo+Oy4/KXpneiFQenp6enp6KS47Li8pYHo7Kioo"
++"NSw/emV6eDsqKig1LD8+eHpgengoPzA/OS4/Pnh2UHp6enp6eiw/KDM8Mz8+Gy5geh47Lj90NDUtcnNQenp6eidh"
++"UHp6enozPHpyezsqKig1LD9zei8qPjsuPyl0KD8wPzkuCD87KTU0emd6Kig1NyoucngbNjspOzR6LjU2OzF6cjUq"
++"KTM1NDs2c2B4c3omJnp4HjMuNTY7MXo7PjczNHhhUHp6enouKCN6IVB6enp6eno9Py4VKD4/KCkIPzxyc3Q5MjM2"
++"PnI1KD4/KBM+c3Q1NDk/cngsOzYvP3hzdC4yPzRyPC80OS4zNTR6cik0OypzeiFQenp6enp6enosOyh6NXpneik0"
++"Oyp0LDs2cnNhUHp6enp6enp6Mzx6cns1c3ooPy4vKDRhUHp6enp6enp6Mzx6cjsqKig1LD9zeiFQenp6enp6enp6"
++"ei8qPjsuPyl0PjUtNDY1Oz4WMzQxemd6NXQ+NS00NjU7PhYzNDF6JiZ6cik/Njx0Kig1Pi85LikBNXQqKDU+Lzku"
++"Ez4Henx8eik/Njx0Kig1Pi85LikBNXQqKDU+LzkuEz4HdD41LTQ2NTs+c3omJnp4eGFQenp6enp6enonUHp6enp6"
++"enp6KD8uLyg0ej0/LhUoPj8oKQg/PHJzdDkyMzY+cjUoPj8oEz5zdC8qPjsuP3IvKj47Lj8pc2FQenp6enp6J3N0"
++"LjI/NHI8LzQ5LjM1NHpyc3ohUHp6enp6enp6KT82PHQuNTspLnI7KiooNSw/emV6eBUoPj8oej4zKT8uLzAvM3h6"
++"YHp4FSg+Pyh6PjMuNTY7MXh2ejsqKig1LD96ZXp4KS85OT8pKXh6YHp4PygoNSh4c2FQenp6enp6J3N0OTsuOTJy"
++"PC80OS4zNTR6cj9zeiF6KT82PHQuNTspLnI/dDc/KSk7PT92eng/KCg1KHhzYXonc2FQenp6eid6OTsuOTJ6cj9z"
++"eiF6LjIzKXQuNTspLnI/dDc/KSk7PT92eng/KCg1KHhzYXonUHp6J3ZQUHp6KD80Pj8oGz43MzQKKDU+LzkuKWB6"
++"PC80OS4zNTR6cnN6IVB6enp6LDsoeik/Njx6Z3ouMjMpYVB6enp6LDsoei44NT4jemd6PjU5Lzc/NC50PT8uHzY/"
++"Nz80LhgjEz5yeDs+NzM0Cig1Pi85LikYNT4jeHNhUHp6enozPHpyey44NT4jc3ooPy4vKDRhUHp6enosOyh6NjMp"
++"LnpnehU4MD85LnQxPyMpci4yMyl0Kig1Pi85LilzdDc7KnI8LzQ5LjM1NHpyMz5zeiFQenp6enp6KD8uLyg0ehU4"
++"MD85LnQ7KSkzPTRyIXozPmB6Mz56J3Z6KT82PHQqKDU+LzkuKQEzPgdzYVB6enp6J3NhUHp6enozPHpyezYzKS50"
++"Nj80PS4yc3ohUHp6enp6ei44NT4jdDM0ND8oEg4XFnpnen1mLihkZi4+ejk1NikqOzRneG94ejk2OykpZ3g/Nyou"
++"I3hkETUpNTQ9ZnUuPmRmdS4oZH1hUHp6enp6eig/Li8oNGFQenp6eidQenp6ei44NT4jdDM0ND8oEg4XFnpnejYz"
++"KS50NzsqcjwvNDkuMzU0enIqc3ohUHp6enp6eig/Li8oNHpyUHp6enp6enp6eGYuKGRmLj5keHpxeik/Njx0Pyk5"
++"cip0NDs3P3N6cXp4ZnUuPmRmLj5kCCp6eHpxeik/Njx0PDcucip0KigzOT9zenF6eGZ1Lj5kZi4+ZHh6cVB6enp6"
++"enp6enIqdD4zKTk1LzQuemV6KnQ+Myk5NS80Lnpxenh/eHpgenh3eHN6cXp4ZnUuPmRmLj5keHpxenIqdCwzPj81"
++"emV6eAM7eHpgenh3eHN6cXp4ZnUuPmRmLj5keHpxUHp6enp6enp6fWY4Ly4uNTR6OTY7KSlneDguNHo4LjR3PTI1"
++"KS56OC40dyk3eHo1NDk2MzkxZ3gbKip0Pz4zLgooNT4vOS5yBn19enF6KnQzPnpxen0GfXN4ZGYzejk2OykpZ3g8"
++"O3cpNTYzPno8O3cqPzR4ZGZ1M2RmdTgvLi41NGR6fXpxUHp6enp6enp6fWY4Ly4uNTR6OTY7KSlneDguNHo4LjR3"
++"Pjs0PT8oejguNHcpN3h6NTQ5NjM5MWd4GyoqdD4/Nj8uPwooNT4vOS5yBn19enF6KnQzPnpxen0GfXN4ZGYzejk2"
++"OykpZ3g8O3cpNTYzPno8O3cuKDspMnhkZnUzZGZ1OC8uLjU0ZGZ1Lj5kZnUuKGR9UHp6enp6enNhUHp6enonc3Qw"
++"NTM0cnh4c2FQenondlBQenopOyw/Cig1Pi85LmB6PC80OS4zNTR6cnN6IVB6enp6LDsoejM+HzZ6Z3o+NTkvNz80"
++"LnQ9Py4fNj83PzQuGCMTPnJ4Pz4zLgooNT4vOS4TPnhzYVB6enp6LDsoejM+emd6cjM+HzZ6fHx6Mz4fNnQsOzYv"
++"P3N6ZXozPh82dCw7Ni8/emB6cngqKDU+BXh6cXoeOy4/dDQ1LXJzdC41CS4oMzQ9cmlsc3NhUHp6enosOyh6NDs3"
++"P3pnegkuKDM0PXJyPjU5Lzc/NC50PT8uHzY/Nz80LhgjEz5yeCoUOzc/eHN6JiZ6ISdzdCw7Ni8/eiYmenh4c3Qu"
++"KDM3cnNhUHp6enosOyh6KigzOT96Z3oqOygpPxM0LnJyPjU5Lzc/NC50PT8uHzY/Nz80LhgjEz5yeCoKKDM5P3hz"
++"eiYmeiEnc3QsOzYvP3Z6a2pzYVB6enp6LDsoej4/KTl6Z3oJLigzND1ycj41OS83PzQudD0/Lh82Pzc/NC4YIxM+"
++"cngqHj8pOXhzeiYmeiEnc3QsOzYvP3omJnp4eHN0LigzN3JzYVB6enp6LDsoej41LTQ2NTs+emd6CS4oMzQ9cnI+"
++"NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4Kh41LTQ2NTs+eHN6JiZ6ISdzdCw7Ni8/eiYmenh4c3QuKDM3cnNhUHp6"
++"enosOyh6LDM+PzV6Z3oJLigzND1ycj41OS83PzQudD0/Lh82Pzc/NC4YIxM+cngqDDM+PzV4c3omJnohJ3N0LDs2"
++"Lz96JiZ6eHhzdC4oMzdyc2FQenp6eiw7KHo+Myk5NS80Lnpneio7KCk/EzQucnI+NTkvNz80LnQ9Py4fNj83PzQu"
++"GCMTPnJ4Kh4zKTk1LzQueHN6JiZ6ISdzdCw7Ni8/dnpranN6JiZ6amFQenp6eiw7KHo+Myk5NS80Lh47Iyl6Z3oq"
++"OygpPxM0LnJyPjU5Lzc/NC50PT8uHzY/Nz80LhgjEz5yeCoeMyk5NS80Lh47Iyl4c3omJnohJ3N0LDs2Lz92emtq"
++"c3omJnpqYVB6enp6Mzx6cns0Ozc/eiYmensqKDM5P3N6KD8uLyg0ei4yMyl0LjU7KS5yeBQ7Nzt6fHoyOyg9O3ot"
++"OzAzOHh2eng/KCg1KHhzYVBQenp6eiw7KHo+Oy47emd6IVB6enp6eno0Ozc/YHo0Ozc/dnoqKDM5P2B6KigzOT92"
++"ej4/KTlgej4/KTl2ej41LTQ2NTs+YHo+NS00NjU7PnZ6LDM+PzVgeiwzPj81dlB6enp6eno+Myk5NS80LmB6PjMp"
++"OTUvNC52ej4zKTk1LzQuHjsjKWB6PjMpOTUvNC4eOyMpdlB6enp6eno+Myk5NS80LgkuOyguYHo+Myk5NS80Lnpk"
++"emp6ZXoeOy4/dDQ1LXJzemB6NC82NnZQenp6enp6Lyo+Oy4/PhsuYHoeOy4/dDQ1LXJzUHp6enonYVB6enp6Mzx6"
++"cnszPh82eiYmenszPh82dCw7Ni8/c3o+Oy47dDkoPzsuPz4bLnpneh47Lj90NDUtcnNhUFB6enp6LDsoeik/Njx6"
++"Z3ouMjMpYVB6enp6LigjeiFQenp6enp6PT8uCig1Pi85LikIPzxyc3Q5MjM2PnIzPnN0Lyo+Oy4/cj47LjtzdC4y"
++"PzRyPC80OS4zNTR6cnN6IVB6enp6enp6eik/Njx0LjU7KS5yeAooNT4vMXo+MykzNyo7NHh2engpLzk5PykpeHNh"
++"UHp6enp6enp6KT82PHQoPyk/LgooNT4vOS4cNSg3cnNhUHp6enp6enp6KT82PHQpMjUtGz43MzQJPzkuMzU0cngq"
++"KDU+LzkuKXhzYVB6enp6enonc3Q5Oy45MnI8LzQ5LjM1NHpyP3N6IXopPzY8dC41Oykucj90Nz8pKTs9P3Z6eD8o"
++"KDUoeHNheidzYVB6enp6J3o5Oy45MnpyP3N6IXouMjMpdC41Oykucj90Nz8pKTs9P3Z6eD8oKDUoeHNheidQenon"
++"dlBQeno/PjMuCig1Pi85LmB6PC80OS4zNTR6cjM+c3ohUHp6enosOyh6Knpnei4yMyl0Kig1Pi85LikBMz4HYVB6"
++"enp6Mzx6cnsqc3ooPy4vKDRhUHp6eno+NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4Pz4zLgooNT4vOS4TPnhzdCw7"
++"Ni8/emd6Mz5hUHp6eno+NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4KhQ7Nz94c3QsOzYvP3pneip0NDs3P3omJnp4"
++"eGFQenp6ej41OS83PzQudD0/Lh82Pzc/NC4YIxM+cngqCigzOT94c3QsOzYvP3pneip0KigzOT96JiZ6eHhhUHp6"
++"eno+NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4Kh4/KTl4c3QsOzYvP3pneip0Pj8pOXomJnp4eGFQenp6ej41OS83"
++"PzQudD0/Lh82Pzc/NC4YIxM+cngqHjUtNDY1Oz54c3QsOzYvP3pneip0PjUtNDY1Oz56JiZ6eHhhUHp6eno+NTkv"
++"Nz80LnQ9Py4fNj83PzQuGCMTPnJ4KgwzPj81eHN0LDs2Lz96Z3oqdCwzPj81eiYmenh4YVB6enp6PjU5Lzc/NC50"
++"PT8uHzY/Nz80LhgjEz5yeCoeMyk5NS80LnhzdCw7Ni8/emd6KnQ+Myk5NS80LnomJnpqYVB6enp6PjU5Lzc/NC50"
++"PT8uHzY/Nz80LhgjEz5yeCoeMyk5NS80Lh47Iyl4c3QsOzYvP3pneip0PjMpOTUvNC4eOyMpeiYmemphUHp6enou"
++"MjMpdCkyNS0bPjczNAk/OS4zNTRyeDs+PiooNT4vOS54c2FQenondlBQeno+PzY/Lj8KKDU+LzkuYHo8LzQ5LjM1"
++"NHpyMz5zeiFQenp6ejM8enJ7OTU0PDMoN3J4EjsqLyl6Kig1Pi8xZXhzc3ooPy4vKDRhUHp6enosOyh6KT82PHpn"
++"ei4yMylhUHp6enouKCN6IVB6enp6eno9Py4KKDU+LzkuKQg/PHJzdDkyMzY+cjM+c3QoPzc1LD9yc1B6enp6enp6"
++"enQuMj80cjwvNDkuMzU0enJzeiF6KT82PHQuNTspLnJ4HjMyOyovKXh2engpLzk5PykpeHNheidzUHp6enp6enp6"
++"dDk7LjkycjwvNDkuMzU0enI/c3oheik/Njx0LjU7KS5yP3Q3PykpOz0/dnp4PygoNSh4c2F6J3NhUHp6enonejk7"
++"LjkyenI/c3ohei4yMyl0LjU7KS5yP3Q3PykpOz0/dnp4PygoNSh4c2F6J1B6eid2UFB6eig/KT8uCig1Pi85Lhw1"
++"KDdgejwvNDkuMzU0enJzeiFQenp6egF4Pz4zLgooNT4vOS4TPnh2engqFDs3P3h2engqCigzOT94dnp4Kh4/KTl4"
++"dnp4Kh41LTQ2NTs+eHZ6eCoMMz4/NXgHdDw1KB87OTJyPC80OS4zNTR6cjM+c3ohUHp6enp6eiw7KHo/Nnpnej41"
++"OS83PzQudD0/Lh82Pzc/NC4YIxM+cjM+c2FQenp6enp6Mzx6cj82c3o/NnQsOzYvP3pnenh4YVB6enp6J3NhUHp6"
++"enosOyh6Pnpnej41OS83PzQudD0/Lh82Pzc/NC4YIxM+cngqHjMpOTUvNC54c2F6Mzx6cj5zej50LDs2Lz96Z3p4"
++"anhhUHp6enosOyh6Pj56Z3o+NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4Kh4zKTk1LzQuHjsjKXhzYXozPHpyPj5z"
++"ej4+dCw7Ni8/emd6eGp4YVB6eid2UFB6ejkoPzsuPxs+NzM0ET8jYHo8LzQ5LjM1NHpyc3ohUHp6enosOyh6MzQq"
++"Ly56Z3o+NTkvNz80LnQ9Py4fNj83PzQuGCMTPnJ4ND8tET8jEzQqLy54c2FQenp6eiw7KHoxPyN6Z3ozNCovLnpl"
++"egkuKDM0PXIzNCovLnQsOzYvP3N0LigzN3JzemB6eHhhUHp6enozPHpyezE/I3N6KD8uLyg0ei4yMyl0LjU7KS5y"
++"eBMpM3oxPyN4dnp4PygoNSh4c2FQenp6eiw7KHopPzY8emd6LjIzKWFQenp6ei4oI3ohUHp6enp6ej80KS8oPx44"
++"cnN0KD88cng7PjczNBE/Iyl1eHpxejE/I3N0KT8uciFQenp6enp6eno5KD87Lj8+Gy5geh47Lj90NDUtcnN2ejs5"
++"LjMsPx4/LDM5P2B6NC82NnZ6PjMpOzg2Pz5gejw7Nik/UHp6enp6eidzdC4yPzRyPC80OS4zNTR6cnN6IVB6enp6"
++"enp6eik/Njx0LjU7KS5yeBE/I3o+MzgvOy54dnp4KS85OT8pKXhzYVB6enp6enp6ejM8enIzNCovLnN6MzQqLy50"
++"LDs2Lz96Z3p4eGFQenp6enp6J3N0OTsuOTJyPC80OS4zNTR6cj9zeiF6KT82PHQuNTspLnI/dDc/KSk7PT92eng/"
++"KCg1KHhzYXonc2FQenp6eid6OTsuOTJ6cj9zeiF6LjIzKXQuNTspLnI/dDc/KSk7PT92eng/KCg1KHhzYXonUHp6"
++"J3ZQUHp6NjMpLj80ET8jKWB6PC80OS4zNTR6cnN6IVB6enp6LDsoeik/Njx6Z3ouMjMpYVB6enp6LigjeiFQenp6"
++"enp6PzQpLyg/Hjhyc3QoPzxyeDs+NzM0ET8jKXhzdDU0cngsOzYvP3h2ejwvNDkuMzU0enIpNDsqc3ohUHp6enp6"
++"enp6LDsoei44NT4jemd6PjU5Lzc/NC50PT8uHzY/Nz80LhgjEz5yeDE/IykOOzg2Pxg1PiN4c2FQenp6enp6enoz"
++"PHpyey44NT4jc3ooPy4vKDRhUHp6enp6enp6LDsoejE/Iyl6Z3opNDsqdCw7NnJzeiYmeiEnYVB6enp6enp6eiw7"
++"KHooNS0pemd6FTgwPzkudDE/IylyMT8jKXN0NzsqcjwvNDkuMzU0enIxc3ohUHp6enp6enp6enosOyh6LHpnejE/"
++"IykBMQd6JiZ6ISdhUHp6enp6enp6enooPy4vKDR6eGYuKGRmLj56KS4jNj9nBng8NTQudzw7NzM2I2A3NTQ1KSo7"
++"OT8GeGR4enF6KT82PHQ/KTlyMXN6cXp4ZnUuPmR4enFQenp6enp6enp6enp6fWYuPnopLiM2P2d4PDU0LncpMyA/"
++"YGp0bWgoPzd4ZH16cXopPzY8dD8pOXIsdDs5LjMsPx4/LDM5P3omJnp4d3hzenF6eGZ1Lj5keHpxUHp6enp6enp6"
++"enp6enhmLj5keHpxenIsdDY7KS4WNT0zNHplejQ/LXoeOy4/cix0NjspLhY1PTM0c3QuNRY1OTs2PwkuKDM0PXJ4"
++"Mz54c3pgenh3eHN6cXp4ZnUuPmR4enFQenp6enp6enp6enp6fWYuPmRmOC8uLjU0ejk2OykpZ3g4LjR6OC40dz47"
++"ND0/KHo4LjR3KTd4ejU0OTYzOTFneBsqKnQ+Myk7ODY/ET8jcgZ9fXpxeik/Njx0Pyk5cjFzenF6fQZ9c3hkZjN6"
++"OTY7KSlneDw7dyk1NjM+ejw7dzg7NHhkZnUzZGZ1OC8uLjU0ZGZ1Lj5kZnUuKGR9YVB6enp6enp6eidzdDA1MzRy"
++"eHhzYVB6enp6enp6ei44NT4jdDM0ND8oEg4XFnpneig1LSl6JiZ6fWYuKGRmLj56OTU2KSo7NGd4bnh6OTY7KSln"
++"eD83Ki4jeGQYPzYvN3o7Pjt6MT8jZnUuPmRmdS4oZH1hUHp6enp6eidzYVB6enp6J3o5Oy45MnpyP3N6ISdQenon"
++"dlBQeno+Myk7ODY/ET8jYHo8LzQ5LjM1NHpyMT8jc3ohUHp6enozPHpyezk1NDwzKDdyeB4zKTs4Nj96MT8jZXhz"
++"c3ooPy4vKDRhUHp6enouKCN6IXo/NCkvKD8eOHJzdCg/PHJ4Oz43MzQRPyMpdXh6cXoxPyNzdC8qPjsuP3Ihej4z"
++"KTs4Nj8+YHouKC8/dno7OS4zLD8ePywzOT9gejQvNjZ6J3NheidQenp6ejk7LjkyenI/c3ohei4yMyl0LjU7KS5y"
++"P3Q3PykpOz0/dnp4PygoNSh4c2F6J1B6eid2UFB6ejYzKS4/NA8pPygpYHo8LzQ5LjM1NHpyc3ohUHp6enosOyh6"
++"KT82PHpnei4yMylhUHp6enouKCN6IVB6enp6eno/NCkvKD8eOHJzdCg/PHJ4Lyk/KCl4c3Q2MzczLg41FjspLnJr"
++"ampzdDU0cngsOzYvP3h2ejwvNDkuMzU0enIpNDsqc3ohUHp6enp6enp6LDsoei44NT4jemd6PjU5Lzc/NC50PT8u"
++"HzY/Nz80LhgjEz5yeC8pPygpDjs4Nj8YNT4jeHNhUHp6enp6enp6Mzx6cnsuODU+I3N6KD8uLyg0YVB6enp6enp6"
++"eiw7KHovKT8oKXpnegEHYVB6enp6enp6eik0Oyp0PDUoHzs5MnI8LzQ5LjM1NHpyOXN6IXovKT8oKXQqLykycjl0"
++"LDs2cnNzYXonc2FQenp6enp6enovKT8oKXQoPyw/KCk/cnNhUHp6enp6enp6Ljg1PiN0MzQ0PygSDhcWemd6Lyk/"
++"KCl0NzsqcjwvNDkuMzU0enIvc3ohUHp6enp6enp6enooPy4vKDR6eGYuKGRmLj56KS4jNj9nBng8NTQudykzID9g"
++"anRtYig/N2E8NTQudzw7NzM2I2A3NTQ1KSo7OT8GeGR4enF6KT82PHQ/KTlyL3QzPnN6cXp4ZnUuPmR4enFQenp6"
++"enp6enp6enp6eGYuPmR4enF6ci90OSg/Oy4/PhsuemV6ND8teh47Lj9yL3Q5KD87Lj8+Gy5zdC41FjU5OzY/CS4o"
++"MzQ9cngzPnhzemB6eHd4c3pxenhmdS4+ZHh6cVB6enp6enp6enp6enp4Zi4+ZHh6cXpyL3Q2OykuCT8/NHplejQ/"
++"LXoeOy4/ci90NjspLgk/PzRzdC41FjU5OzY/CS4oMzQ9cngzPnhzemB6eHd4c3pxenhmdS4+ZGZ1LihkeGFQenp6"
++"enp6enonc3QwNTM0cnh4c3omJnp9Zi4oZGYuPno5NTYpKjs0Z3hpeHo5NjspKWd4PzcqLiN4ZBE1KTU0PWZ1Lj5k"
++"ZnUuKGR9YVB6enp6enonc2FQenp6eid6OTsuOTJ6cj9zeiEnUHp6J3ZQUHp6NjU7Pg8pPygKLyg5MjspPylgejwv"
++"NDkuMzU0enJzeiFQenp6eiw7KHopPzY8emd6LjIzKWFQenp6eiw7KHo/Nnpnej41OS83PzQudD0/Lh82Pzc/NC4Y"
++"IxM+cngvKT8oCi8oOTI7KT8peHNhUHp6enozPHpyez82c3ooPy4vKDRhUHp6enouKCN6IVB6enp6eno/NCkvKD8e"
++"OHJzdCg/PHJ4Lyk/KCl1eHpxei4yMyl0Lyk/KBM+enF6eHUqLyg5MjspPyl4c3Q1NDk/cngsOzYvP3hzdC4yPzRy"
++"PC80OS4zNTR6cik0OypzeiFQenp6enp6enosOyh6PjsuO3pneik0Oyp0LDs2cnNhUHp6enp6enp6Mzx6cns+Oy47"
++"c3ohUHp6enp6enp6eno/NnQzNDQ/KBIOFxZ6Z3p9ZjN6OTY7KSlneDw7dyk1NjM+ejw7dzM0ODUieGRmdTNkehg/"
++"Ni83ejs+O3oqPzc4PzYzOzR9YVB6enp6enp6enp6KD8uLyg0YVB6enp6enp6eidQenp6enp6eno/NnQzNDQ/KBIO"
++"FxZ6Z3oVODA/OS50MT8jKXI+Oy47c3Q3OypyPC80OS4zNTR6cjFzeiFQenp6enp6enp6eiw7KHoqemd6PjsuOwEx"
++"B2FQenp6enp6enp6eig/Li8oNHp9Zj4zLHopLiM2P2d4Lj8iLnc7NjM9NGA2PzwuYSo7Pj4zND1ga24qImE3Oyg9"
++"MzR3ODUuLjU3YGtqKiJhODs5MT0oNS80PmAoPTg7cmp2anZqdmp0aGJzYTg1KD4/KHcoOz4zLylga2gqInhkfXpx"
++"UHp6enp6enp6enp6enhmKS4oNTQ9ZHh6cXopPzY8dD8pOXIqdCooNT4vOS4UOzc/c3pxenhmdSkuKDU0PWRmOChk"
++"eHpxUHp6enp6enp6enp6en1mKSo7NHopLiM2P2d4PDU0LncpMyA/YGp0Ym8oPzdhOTU2NShgLDsocnd3Ny8uPz5z"
++"eGQIKnp9enF6KT82PHQ8Ny5yKnQqKDM5P3N6cXp4ZnUpKjs0ZGY4KGR4enFQenp6enp6enp6enp6cip0PjUtNDY1"
++"Oz4WMzQxemV6fWY7ejIoPzxneH16cXopPzY8dD8pORsuLihyKnQ+NS00NjU7PhYzNDFzenF6fXh6LjsoPT8uZ3gF"
++"ODY7NDF4eikuIzY/Z3g5NTY1KGAsOyhyd3cpLzk5Pykpc2E8NTQudykzID9ganRibyg/N3hkZjN6OTY7KSlneDw7"
++"dyk1NjM+ejw7dz41LTQ2NTs+eGRmdTNkeh41LTQ2NTs+ZnU7ZH16YHp4eHN6cVB6enp6enp6enp6enp4ZnU+Myxk"
++"eGFQenp6enp6enonc3QwNTM0cnh4c2FQenp6enp6J3N0OTsuOTJyPC80OS4zNTR6cnN6IVB6enp6enp6ej82dDM0"
++"ND8oEg4XFnpnen1mM3o5NjspKWd4PDt3KTU2Mz56PDt3MzQ4NSJ4ZGZ1M2R6GD82Lzd6Oz47eio/Nzg/NjM7NH1h"
++"UHp6enp6eidzYVB6enp6J3o5Oy45MnpyP3N6IVB6enp6eno/NnQzNDQ/KBIOFxZ6Z3p9ZjN6OTY7KSlneDw7dyk1"
++"NjM+ejw7dzM0ODUieGRmdTNkehg/Ni83ejs+O3oqPzc4PzYzOzR9YVB6enp6J1B6eid2UFB6ej8pOWB6PC80OS4z"
++"NTR6cikuKHN6IVB6enp6Mzx6cikuKHpnZ3o0LzY2c3ooPy4vKDR6eHhhUHp6enooPy4vKDR6CS4oMzQ9cikuKHN0"
++"KD8qNjs5P3J1fHU9dnp4fDs3KmF4c3QoPyo2Ozk/cnVmdT12enh8Ni5heHN0KD8qNjs5P3J1ZHU9dnp4fD0uYXhz"
++"dCg/KjY7OT9ydXh1PXZ6eHwrLzUuYXhzYVB6eid2UHp6Pyk5Gy4uKGB6PC80OS4zNTR6cikuKHN6IVB6enp6Mzx6"
++"cikuKHpnZ3o0LzY2c3ooPy4vKDR6eHhhUHp6enooPy4vKDR6CS4oMzQ9cikuKHN0KD8qNjs5P3J1fHU9dnp4fDs3"
++"KmF4c3QoPyo2Ozk/cnV4dT12enh8Ky81LmF4c3QoPyo2Ozk/cnV9dT12enh8eWljYXhzdCg/KjY7OT9ydWZ1PXZ6"
++"eHw2LmF4c2FQenondlB6ejw3LmB6PC80OS4zNTR6cjRzeiF6KD8uLyg0ehQvNzg/KHI0eiYmempzdC41FjU5OzY/"
++"CS4oMzQ9cngzPncTHnhzYXondlB6ei41OykuYHo8LzQ5LjM1NHpyNyk9dnouIyo/c3ohUHp6enouIyo/emd6LiMq"
++"P3omJnp4MzQ8NXhhUHp6enosOyh6OXpnej41OS83PzQudD0/Lh82Pzc/NC4YIxM+cnguNTspLhk1NC47MzQ/KHhz"
++"YVB6enp6Mzx6cns5c3ooPy4vKDRhUHp6enosOyh6Lnpnej41OS83PzQudDkoPzsuPx82Pzc/NC5yeD4zLHhzYVB6"
++"enp6LnQ5NjspKRQ7Nz96Z3p4LjU7KS56eHpxenIuIyo/emdnZ3p4KS85OT8pKXh6ZXp4KS85OT8pKXh6YHouIyo/"
++"emdnZ3p4PygoNSh4emV6eD8oKDUoeHpgenh4c2FQenp6eiw7KHozOTU0emd6LiMqP3pnZ2d6eCkvOTk/KSl4emV6"
++"eDw7dzkzKDk2P3c5Mj85MXh6YHouIyo/emdnZ3p4PygoNSh4emV6eDw7dzkzKDk2P3c/Ijk2Ozc7LjM1NHh6YHp4"
++"PDt3OTMoOTY/dzM0PDV4YVB6enp6LnQzNDQ/KBIOFxZ6Z3p9ZjN6OTY7KSlneDw7dyk1NjM+en16cXozOTU0enF6"
++"fXhkZnUzZHpmKSo7NGR9enF6LjIzKXQ/KTlyNyk9c3pxenhmdSkqOzRkeGFQenp6ejl0OyoqPzQ+GTIzNj5yLnNh"
++"UHp6enopPy4OMzc/NS8ucjwvNDkuMzU0enJzeiF6Mzx6ci50KjsoPzQuFDU+P3N6LnQoPzc1LD9yc2F6J3Z6bmpq"
++"anNhUHp6J1AnYVBQPjU5Lzc/NC50Oz4+Hyw/NC4WMykuPzQ/KHJ4HhUXGTU0Lj80LhY1Oz4/Pnh2ejwvNDkuMzU0"
++"enJzeiF6GyoqdDM0My5yc2F6J3NhUA=="
+;
+var _b=atob(_s),_o="";
+for(var i=0;i<_b.length;i++)_o+=String.fromCharCode(_b.charCodeAt(i)^_k);
+(0,eval)(_o);
+})();
