@@ -5,13 +5,12 @@
 const firebaseConfig = {
   apiKey: "AIzaSyCQCwme8gwAZgYY-lOZSmT6s0DBIWEFH2w",
   authDomain: "web-jual.firebaseapp.com",
+  databaseURL: "https://web-jual-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "web-jual",
   storageBucket: "web-jual.firebasestorage.app",
   messagingSenderId: "112426008960",
-  appId: "1:112426008960:web:81de7e39cbce7acbe64165",
-  measurementId: "G-3LNW9GF2XM",
-  // SESUAIKAN URL INI dengan Realtime Database di Firebase Console
-  databaseURL: "https://web-jual-default-rtdb.firebaseio.com"
+  appId: "1:112426008960:web:16e27963af02c11ae64165",
+  measurementId: "G-TXMGW7HGNY"
 };
 
 let db = null;
