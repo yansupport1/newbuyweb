@@ -62,6 +62,7 @@ const App = {
     var box = document.getElementById("dashboardVideoBox");
     if (!box) return;
     var url = (typeof CONFIG !== "undefined" && CONFIG.dashboardVideoUrl) ? String(CONFIG.dashboardVideoUrl).trim() : "";
+    this._videoMuted = true;
     if (!url) {
       box.innerHTML = '<div class="video-placeholder"><i class="fa-solid fa-play"></i><span>Set dashboardVideoUrl di config.js</span></div>';
       return;
@@ -69,11 +70,44 @@ const App = {
     if (url.indexOf("youtube.com") !== -1 || url.indexOf("youtu.be") !== -1) {
       var id = this.extractYoutubeId(url);
       box.innerHTML = id
-        ? '<iframe src="https://www.youtube.com/embed/' + id + '?autoplay=1&mute=1&loop=1&controls=0&playlist=' + id + '" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>'
+        ? '<iframe id="dashVideoEl" src="https://www.youtube.com/embed/' + id + '?autoplay=1&mute=1&loop=1&controls=0&playlist=' + id + '" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>'
         : '<div class="video-placeholder"><span>Link YouTube tidak valid</span></div>';
     } else {
-      box.innerHTML = '<video src="' + this.escAttr(url) + '" autoplay muted loop playsinline></video>';
+      box.innerHTML = '<video id="dashVideoEl" src="' + this.escAttr(url) + '" autoplay muted loop playsinline></video>';
     }
+    this._updateAudioIcon();
+  },
+
+  toggleVideoAudio: function () {
+    var v = document.getElementById("dashVideoEl");
+    if (!v) return this.toast("Video belum siap", "error");
+    if (v.tagName === "VIDEO") {
+      this._videoMuted = !this._videoMuted;
+      v.muted = this._videoMuted;
+      if (!this._videoMuted) {
+        var p = v.play();
+        if (p && p.catch) p.catch(function () {});
+      }
+      this._updateAudioIcon();
+    } else {
+      // YouTube iframe: reload with mute 0/1
+      this._videoMuted = !this._videoMuted;
+      var src = v.src || "";
+      if (this._videoMuted) {
+        src = src.replace("mute=0", "mute=1");
+        if (src.indexOf("mute=") === -1) src += (src.indexOf("?") >= 0 ? "&" : "?") + "mute=1";
+      } else {
+        src = src.replace("mute=1", "mute=0");
+      }
+      v.src = src;
+      this._updateAudioIcon();
+    }
+  },
+
+  _updateAudioIcon: function () {
+    var icon = document.getElementById("videoAudioIcon");
+    if (!icon) return;
+    icon.className = this._videoMuted ? "fa-solid fa-volume-xmark" : "fa-solid fa-volume-high";
   },
 
   extractYoutubeId: function (url) {
@@ -260,26 +294,27 @@ const App = {
             '<div class="product-name">' + self.esc(p.name) + "</div>" +
             '<div class="product-desc">' + self.esc(p.desc || "") + "</div>" +
             '<div class="price-row">' +
-              (disc ? '<span class="price-old">Rp ' + self.fmt(p.price) + "</span>" : "") +
-              '<span class="price">Rp ' + self.fmt(final) + "</span>" +
+              (p.isFree ? '<span class="price">GRATIS</span>' : (
+                (disc ? '<span class="price-old">Rp ' + self.fmt(p.price) + "</span>" : "") +
+                '<span class="price">Rp ' + self.fmt(final) + "</span>"
+              )) +
               (disc ? '<span class="discount-badge"><i class="fa-solid fa-tag"></i> ' + p.discount + "%</span>" : "") +
+              (p.isFree ? '<span class="badge-free">GRATIS</span>' : "") +
             "</div>" +
             '<div class="product-actions">' +
-              '<button class="btn btn-primary btn-block" onclick="App.buyProduct(\'' + p.id + '\')">' +
-                '<i class="fa-solid fa-cart-shopping"></i> Buy Now</button>' +
+              (p.isFree
+                ? '<button class="btn btn-success btn-block" onclick="App.openFree(\'' + p.id + '\')"><i class="fa-solid fa-gift"></i> Ambil Gratis</button>'
+                : '<button class="btn btn-primary btn-block" onclick="App.buyProduct(\'' + p.id + '\')"><i class="fa-solid fa-cart-shopping"></i> Buy Now</button>') +
             "</div></div></div>"
       );
     }
 
-    var homeEl = document.getElementById("homeProducts");
     var allEl = document.getElementById("allProducts");
     if (!list.length) {
       var empty = '<div class="empty"><i class="fa-solid fa-box-open"></i>Belum ada produk</div>';
-      if (homeEl) homeEl.innerHTML = empty;
       if (allEl) allEl.innerHTML = empty;
       return;
     }
-    if (homeEl) homeEl.innerHTML = list.slice(0, 6).map(function (p, i) { return card(p, i * 60); }).join("");
     if (allEl) allEl.innerHTML = list.map(function (p, i) { return card(p, i * 40); }).join("");
     this.renderAdminProducts();
   },
@@ -287,6 +322,7 @@ const App = {
   buyProduct: function (id) {
     var p = this.products[id];
     if (!p) return this.toast("Produk tidak ditemukan", "error");
+    if (p.isFree) return this.openFree(id);
     if (!this.globalOn) return this.toast("Admin sedang OFF", "error");
 
     var final = this.getFinalPrice(p);
@@ -790,12 +826,16 @@ const App = {
     var video = String((document.getElementById("pVideo") || {}).value || "").trim();
     var discount = parseInt((document.getElementById("pDiscount") || {}).value, 10) || 0;
     var discountDays = parseInt((document.getElementById("pDiscountDays") || {}).value, 10) || 0;
-    if (!name || !price) return this.toast("Nama & harga wajib", "error");
+    var isFree = !!(document.getElementById("pIsFree") && document.getElementById("pIsFree").checked);
+    if (!name) return this.toast("Nama wajib", "error");
+    if (!isFree && !price) return this.toast("Harga wajib (atau centang GRATIS)", "error");
+    if (isFree) price = 0;
 
     var data = {
-      name: name, price: price, desc: desc, download: download, video: video,
-      discount: discount, discountDays: discountDays,
-      discountStart: discount > 0 ? Date.now() : null,
+      name: name, price: price || 0, desc: desc, download: download, video: video,
+      isFree: isFree,
+      discount: isFree ? 0 : discount, discountDays: isFree ? 0 : discountDays,
+      discountStart: (!isFree && discount > 0) ? Date.now() : null,
       updatedAt: Date.now()
     };
     if (!idEl || !idEl.value) data.createdAt = Date.now();
@@ -821,6 +861,8 @@ const App = {
     document.getElementById("pVideo").value = p.video || "";
     document.getElementById("pDiscount").value = p.discount || 0;
     document.getElementById("pDiscountDays").value = p.discountDays || 0;
+    var freeCb = document.getElementById("pIsFree");
+    if (freeCb) freeCb.checked = !!p.isFree;
     this.showAdminSection("addproduct");
   },
 
@@ -841,6 +883,7 @@ const App = {
     });
     var d = document.getElementById("pDiscount"); if (d) d.value = "0";
     var dd = document.getElementById("pDiscountDays"); if (dd) dd.value = "0";
+    var freeCb = document.getElementById("pIsFree"); if (freeCb) freeCb.checked = false;
   },
 
   createAdminKey: function () {
@@ -1129,6 +1172,49 @@ const App = {
       return "Support: yansupport1@gmail.com · Telegram @yanzking122";
     }
     return "Saya bantu: cara bayar, kode diskon, status, produk, download, support. Tanya lebih spesifik ya.";
+  },
+
+
+  openFree: function (id) {
+    var p = this.products[id];
+    if (!p) return this.toast("Produk tidak ditemukan", "error");
+    this._freeProductId = id;
+    var nameEl = document.getElementById("freeProductName");
+    if (nameEl) nameEl.textContent = p.name + " — ikuti langkah di bawah";
+    var res = document.getElementById("freeResult");
+    if (res) res.innerHTML = "";
+    this.showView("free");
+  },
+
+  claimFree: function () {
+    var id = this._freeProductId;
+    var p = this.products[id];
+    if (!p) return this.toast("Produk tidak ditemukan", "error");
+    var link = p.download || "";
+    var res = document.getElementById("freeResult");
+    if (!link) {
+      if (res) res.innerHTML = '<p style="color:var(--danger)">Link download belum di-set admin.</p>';
+      return;
+    }
+    // simpan ke riwayat user
+    var orderId = "free_" + Date.now().toString(36);
+    try {
+      ensureDb().ref("users/" + this.userId + "/purchases/" + orderId).set({
+        productName: p.name,
+        price: 0,
+        downloadLink: link,
+        free: true,
+        at: Date.now()
+      });
+    } catch (e) {}
+    if (res) {
+      res.innerHTML =
+        '<div style="padding:16px;background:rgba(0,230,118,0.1);border-radius:14px;border:1px solid rgba(0,230,118,0.28)">' +
+          '<strong style="color:var(--success)"><i class="fa-solid fa-circle-check"></i> Siap download</strong>' +
+          '<a href="' + this.escAttr(link) + '" target="_blank" class="btn btn-success btn-block" style="margin-top:12px">' +
+            '<i class="fa-solid fa-download"></i> Download</a></div>';
+    }
+    this.toast("Link download siap", "success");
   },
 
   esc: function (str) {
