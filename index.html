@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="theme-color" content="#8B0000" />
-  <meta name="description" content="Yanz  Store - Premium Digital Products" />
+  <meta name="description" content="Yanz Xiters Store - Premium Digital Products" />
   <title>Yanz Xiters Store</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9889;</text></svg>" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -45,7 +45,7 @@
     <!-- HOME -->
     <section id="view-home" class="view active">
       <div class="hero">
-        <h1 class="neon">Yanz  Store</h1>
+        <h1 class="neon">Yanz Xiters Store</h1>
         <p>Toko digital premium. Produk siap kirim otomatis setelah pembayaran diverifikasi.</p>
         <div class="running-time" id="runningTime">
           <i class="fa-solid fa-clock"></i>
@@ -76,29 +76,31 @@
         </div>
       </div>
 
-      <div class="video-box glass" id="dashboardVideoBox">
+      <div class="video-box-wrap"><div class="video-box glass" id="dashboardVideoBox">
         <div class="video-placeholder">
           <i class="fa-solid fa-play"></i>
           <span>Video Dashboard (atur di config.js)</span>
         </div>
       </div>
+      <button type="button" class="video-audio-btn" id="videoAudioBtn" onclick="App.toggleVideoAudio()" title="Mute/Unmute">
+        <i class="fa-solid fa-volume-xmark" id="videoAudioIcon"></i>
+      </button>
+      </div>
 
-      <h2 class="section-title neon-soft">
-        <i class="fa-solid fa-fire"></i> Produk Unggulan
-      </h2>
-      <div class="products-grid" id="homeProducts">
-        <div class="loader"></div>
       </div>
     </section>
 
     <!-- PRODUCTS -->
-    <section id="view-products" class="view">
-      <h2 class="section-title neon-soft" style="margin-top:36px">
-        <i class="fa-solid fa-boxes-stacked"></i> Semua Produk
+        <section id="view-products" class="view">
+      <h2 class="section-title neon-soft">
+        <i class="fa-solid fa-boxes-stacked"></i> Produk Berbayar
       </h2>
-      <div class="products-grid" id="allProducts">
-        <div class="loader"></div>
-      </div>
+      <div class="products-grid" id="paidProducts"></div>
+      <h2 class="section-title neon-soft" style="margin-top:36px">
+        <i class="fa-solid fa-gift"></i> Produk Gratis
+      </h2>
+      <p style="text-align:center;color:var(--muted);font-size:0.9rem;margin:-8px 0 18px">Follow TikTok &amp; join saluran untuk klaim</p>
+      <div class="products-grid" id="freeProducts"></div>
     </section>
 
     <!-- PROFILE -->
@@ -117,6 +119,25 @@
             Belum ada pembelian
           </div>
         </div>
+      </div>
+    </section>
+
+    
+    <!-- FREE CLAIM -->
+    <section id="view-free" class="view">
+      <div class="payment-wrap glass" style="max-width:480px;margin:36px auto">
+        <h2 class="neon"><i class="fa-solid fa-gift"></i> Produk Gratis</h2>
+        <p id="freeProductName" style="color:var(--muted);margin-bottom:16px">Ikuti langkah berikut untuk mendapatkan download</p>
+        <div class="order-info" id="freeSteps">
+          <div><span>1. Follow TikTok</span><span><a href="https://www.tiktok.com/@yanzking1222" target="_blank" rel="noopener" style="color:var(--blood-neon)">@yanzking1222</a></span></div>
+          <div><span>2. Join Saluran WA</span><span><a href="https://whatsapp.com/channel/0029VbCOBUF3AzNaDiTKoO2v" target="_blank" rel="noopener" style="color:var(--blood-neon)">Buka saluran</a></span></div>
+        </div>
+        <p style="font-size:0.85rem;color:var(--muted);margin:16px 0">Setelah follow & join, klik tombol di bawah.</p>
+        <button class="btn btn-primary btn-block" id="btnClaimFree" onclick="App.claimFree()">
+          <i class="fa-solid fa-download"></i> Saya sudah follow & join — Ambil Download
+        </button>
+        <div id="freeResult" class="mt-2"></div>
+        <button class="btn btn-ghost btn-block" style="margin-top:12px" onclick="App.showView('products')">Kembali ke Produk</button>
       </div>
     </section>
 
@@ -239,7 +260,7 @@
 
             <div id="admin-orders" class="admin-section active">
               <h2 class="section-title"><i class="fa-solid fa-receipt"></i> Bukti Transfer</h2>
-              <div class="table-wrap glass">
+              <div class="table-wrap glass desktop-table">
                 <table>
                   <thead>
                     <tr>
@@ -257,6 +278,7 @@
                   </tbody>
                 </table>
               </div>
+              <div class="orders-cards" id="ordersCards"></div>
             </div>
 
             <div id="admin-products" class="admin-section">
@@ -302,6 +324,9 @@
                 <div class="form-group">
                   <label>Link Video (Catbox / direct / YouTube)</label>
                   <input type="text" id="pVideo" placeholder="https://files.catbox.moe/xxx.mp4" />
+                </div>
+                <div class="form-group">
+                  <label><input type="checkbox" id="pIsFree" /> Produk GRATIS (follow TikTok + join saluran, tanpa bayar)</label>
                 </div>
                 <div class="form-group">
                   <label>Diskon % (0 = tidak diskon)</label>

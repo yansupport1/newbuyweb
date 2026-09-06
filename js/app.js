@@ -62,6 +62,7 @@ const App = {
     var box = document.getElementById("dashboardVideoBox");
     if (!box) return;
     var url = (typeof CONFIG !== "undefined" && CONFIG.dashboardVideoUrl) ? String(CONFIG.dashboardVideoUrl).trim() : "";
+    this._videoMuted = true;
     if (!url) {
       box.innerHTML = '<div class="video-placeholder"><i class="fa-solid fa-play"></i><span>Set dashboardVideoUrl di config.js</span></div>';
       return;
@@ -69,11 +70,44 @@ const App = {
     if (url.indexOf("youtube.com") !== -1 || url.indexOf("youtu.be") !== -1) {
       var id = this.extractYoutubeId(url);
       box.innerHTML = id
-        ? '<iframe src="https://www.youtube.com/embed/' + id + '?autoplay=1&mute=1&loop=1&controls=0&playlist=' + id + '" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>'
+        ? '<iframe id="dashVideoEl" src="https://www.youtube.com/embed/' + id + '?autoplay=1&mute=1&loop=1&controls=0&playlist=' + id + '" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>'
         : '<div class="video-placeholder"><span>Link YouTube tidak valid</span></div>';
     } else {
-      box.innerHTML = '<video src="' + this.escAttr(url) + '" autoplay muted loop playsinline></video>';
+      box.innerHTML = '<video id="dashVideoEl" src="' + this.escAttr(url) + '" autoplay muted loop playsinline></video>';
     }
+    this._updateAudioIcon();
+  },
+
+  toggleVideoAudio: function () {
+    var v = document.getElementById("dashVideoEl");
+    if (!v) return this.toast("Video belum siap", "error");
+    if (v.tagName === "VIDEO") {
+      this._videoMuted = !this._videoMuted;
+      v.muted = this._videoMuted;
+      if (!this._videoMuted) {
+        var p = v.play();
+        if (p && p.catch) p.catch(function () {});
+      }
+      this._updateAudioIcon();
+    } else {
+      // YouTube iframe: reload with mute 0/1
+      this._videoMuted = !this._videoMuted;
+      var src = v.src || "";
+      if (this._videoMuted) {
+        src = src.replace("mute=0", "mute=1");
+        if (src.indexOf("mute=") === -1) src += (src.indexOf("?") >= 0 ? "&" : "?") + "mute=1";
+      } else {
+        src = src.replace("mute=1", "mute=0");
+      }
+      v.src = src;
+      this._updateAudioIcon();
+    }
+  },
+
+  _updateAudioIcon: function () {
+    var icon = document.getElementById("videoAudioIcon");
+    if (!icon) return;
+    icon.className = this._videoMuted ? "fa-solid fa-volume-xmark" : "fa-solid fa-volume-high";
   },
 
   extractYoutubeId: function (url) {
@@ -260,33 +294,37 @@ const App = {
             '<div class="product-name">' + self.esc(p.name) + "</div>" +
             '<div class="product-desc">' + self.esc(p.desc || "") + "</div>" +
             '<div class="price-row">' +
-              (disc ? '<span class="price-old">Rp ' + self.fmt(p.price) + "</span>" : "") +
-              '<span class="price">Rp ' + self.fmt(final) + "</span>" +
+              (p.isFree ? '<span class="price">GRATIS</span>' : (
+                (disc ? '<span class="price-old">Rp ' + self.fmt(p.price) + "</span>" : "") +
+                '<span class="price">Rp ' + self.fmt(final) + "</span>"
+              )) +
               (disc ? '<span class="discount-badge"><i class="fa-solid fa-tag"></i> ' + p.discount + "%</span>" : "") +
+              (p.isFree ? '<span class="badge-free">GRATIS</span>' : "") +
             "</div>" +
             '<div class="product-actions">' +
-              '<button class="btn btn-primary btn-block" onclick="App.buyProduct(\'' + p.id + '\')">' +
-                '<i class="fa-solid fa-cart-shopping"></i> Buy Now</button>' +
+              (p.isFree
+                ? '<button class="btn btn-success btn-block" onclick="App.openFree(\'' + p.id + '\')"><i class="fa-solid fa-gift"></i> Ambil Gratis</button>'
+                : '<button class="btn btn-primary btn-block" onclick="App.buyProduct(\'' + p.id + '\')"><i class="fa-solid fa-cart-shopping"></i> Buy Now</button>') +
             "</div></div></div>"
       );
     }
 
-    var homeEl = document.getElementById("homeProducts");
+    var paidEl = document.getElementById("paidProducts");
+    var freeEl = document.getElementById("freeProducts");
     var allEl = document.getElementById("allProducts");
-    if (!list.length) {
-      var empty = '<div class="empty"><i class="fa-solid fa-box-open"></i>Belum ada produk</div>';
-      if (homeEl) homeEl.innerHTML = empty;
-      if (allEl) allEl.innerHTML = empty;
-      return;
-    }
-    if (homeEl) homeEl.innerHTML = list.slice(0, 6).map(function (p, i) { return card(p, i * 60); }).join("");
-    if (allEl) allEl.innerHTML = list.map(function (p, i) { return card(p, i * 40); }).join("");
+    var paid = list.filter(function (p) { return !p.isFree; });
+    var free = list.filter(function (p) { return !!p.isFree; });
+    var empty = '<div class="empty"><i class="fa-solid fa-box-open"></i>Belum ada produk</div>';
+    if (paidEl) paidEl.innerHTML = paid.length ? paid.map(function (p, i) { return card(p, i * 40); }).join("") : empty;
+    if (freeEl) freeEl.innerHTML = free.length ? free.map(function (p, i) { return card(p, i * 40); }).join("") : empty;
+    if (allEl && !paidEl) allEl.innerHTML = list.length ? list.map(function (p, i) { return card(p, i * 40); }).join("") : empty;
     this.renderAdminProducts();
   },
 
   buyProduct: function (id) {
     var p = this.products[id];
     if (!p) return this.toast("Produk tidak ditemukan", "error");
+    if (p.isFree) return this.openFree(id);
     if (!this.globalOn) return this.toast("Admin sedang OFF", "error");
 
     var final = this.getFinalPrice(p);
@@ -334,11 +372,22 @@ const App = {
     this._currentOrderId = order.id;
     var info = document.getElementById("orderInfo");
     if (info) {
+      var base = order.priceOriginal != null ? order.priceOriginal : null;
+      var hasPromo = !!(order.promoCode && order.promoPercent);
+      var priceBlock = "";
+      if (hasPromo && base != null) {
+        priceBlock =
+          '<div><span>Harga awal</span><span style="text-decoration:line-through;color:var(--muted)">Rp ' + this.fmt(base) + "</span></div>" +
+          '<div><span>Diskon (' + this.esc(String(order.promoCode)) + ')</span><span style="color:var(--success)">-' + order.promoPercent + "%</span></div>" +
+          '<div><span>Total bayar</span><span class="neon">Rp ' + this.fmt(order.price) + "</span></div>";
+      } else {
+        priceBlock = '<div><span>Total</span><span class="neon">Rp ' + this.fmt(order.price) + "</span></div>";
+      }
       info.innerHTML =
         "<div><span>Order ID</span><span>" + this.esc(order.id) + "</span></div>" +
         "<div><span>Produk</span><span>" + this.esc(order.productName) + "</span></div>" +
-        '<div><span>Total</span><span class="neon">Rp ' + this.fmt(order.price) + "</span></div>" +
-        "<div><span>User ID</span><span style=\"font-size:0.75rem\">" + this.esc(order.userId) + "</span></div>";
+        priceBlock +
+        '<div><span>User ID</span><span style="font-size:0.75rem">' + this.esc(order.userId) + "</span></div>";
     }
 
     var qrUrl = (CONFIG && CONFIG.qrPaymentUrl) ? String(CONFIG.qrPaymentUrl).trim() : "";
@@ -639,42 +688,56 @@ const App = {
         snap.forEach(function (c) { orders.push(Object.assign({ id: c.key }, c.val())); });
         orders.reverse();
         var tbody = document.getElementById("ordersTableBody");
-        if (!tbody) return;
+        var cards = document.getElementById("ordersCards");
         if (!orders.length) {
-          tbody.innerHTML = '<tr><td colspan="7" class="empty">Belum ada order</td></tr>';
+          if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="empty">Belum ada order</td></tr>';
+          if (cards) cards.innerHTML = '<div class="empty">Belum ada order</div>';
           return;
         }
-        tbody.innerHTML = orders.map(function (o) {
-          var st = o.status === "approved" ? "approved" : o.status === "rejected" ? "rejected" : "pending";
-          var aksi = "-";
+        function aksiHtml(o) {
           if (o.status === "pending" && o.buktiTf) {
-            aksi =
-              '<button class="btn btn-success btn-sm" onclick="App.verifyOrder(\'' + o.id + '\', true)"><i class="fa-solid fa-check"></i> Terima</button> ' +
+            return '<button class="btn btn-success btn-sm" onclick="App.verifyOrder(\'' + o.id + '\', true)"><i class="fa-solid fa-check"></i> Terima</button> ' +
               '<button class="btn btn-danger btn-sm" onclick="App.verifyOrder(\'' + o.id + '\', false)"><i class="fa-solid fa-xmark"></i> Tolak</button>';
-          } else if (o.status === "approved") {
-            aksi =
-              '<button class="btn btn-ghost btn-sm" onclick="App.copyReceipt(\'' + o.id + '\')"><i class="fa-solid fa-copy"></i> Salin</button> ' +
-              '<button class="btn btn-ghost btn-sm" onclick="App.printReceipt(\'' + o.id + '\')"><i class="fa-solid fa-print"></i> Cetak</button>';
           }
-          var buktiCell = "-";
-          if (o.buktiTf) {
-            if (String(o.buktiTf).indexOf("data:image") === 0) {
-              buktiCell = '<img src="' + o.buktiTf + '" alt="bukti" style="width:48px;height:48px;object-fit:cover;border-radius:8px;cursor:zoom-in" onclick="App.openLightbox(this.src)" />';
-            } else {
-              buktiCell = '<a href="' + self.escAttr(o.buktiTf) + '" target="_blank" style="color:var(--blood-neon)"><i class="fa-solid fa-eye"></i></a>';
-            }
+          if (o.status === "approved") {
+            return '<button class="btn btn-ghost btn-sm" onclick="App.copyReceipt(\'' + o.id + '\')"><i class="fa-solid fa-copy"></i></button> ' +
+              '<button class="btn btn-ghost btn-sm" onclick="App.printReceipt(\'' + o.id + '\')"><i class="fa-solid fa-print"></i></button>';
           }
-          return (
-            "<tr>" +
+          return "-";
+        }
+        function buktiHtml(o) {
+          if (!o.buktiTf) return "-";
+          if (String(o.buktiTf).indexOf("data:image") === 0) {
+            return '<img src="' + o.buktiTf + '" alt="bukti" class="bukti-thumb" onclick="App.openLightbox(this.src)" />';
+          }
+          return '<a href="' + self.escAttr(o.buktiTf) + '" target="_blank" style="color:var(--blood-neon)"><i class="fa-solid fa-eye"></i></a>';
+        }
+        if (tbody) {
+          tbody.innerHTML = orders.map(function (o) {
+            var st = o.status === "approved" ? "approved" : o.status === "rejected" ? "rejected" : "pending";
+            return "<tr>" +
               '<td style="font-size:0.72rem">' + self.esc(o.id) + "</td>" +
               '<td style="font-size:0.72rem">' + self.esc(o.userId || "-") + "</td>" +
               "<td>" + self.esc(o.productName) + "</td>" +
               "<td>Rp " + self.fmt(o.price) + "</td>" +
-              "<td>" + buktiCell + "</td>" +
+              "<td>" + buktiHtml(o) + "</td>" +
               '<td><span class="badge badge-' + st + '">' + self.esc(o.status) + "</span></td>" +
-              "<td>" + aksi + "</td></tr>"
-          );
-        }).join("");
+              "<td>" + aksiHtml(o) + "</td></tr>";
+          }).join("");
+        }
+        if (cards) {
+          cards.innerHTML = orders.map(function (o) {
+            var st = o.status === "approved" ? "approved" : o.status === "rejected" ? "rejected" : "pending";
+            return '<div class="order-card glass">' +
+              '<div class="order-card-row"><span>Order</span><strong>' + self.esc(o.id) + '</strong></div>' +
+              '<div class="order-card-row"><span>User</span><span style="font-size:0.75rem">' + self.esc(o.userId || "-") + '</span></div>' +
+              '<div class="order-card-row"><span>Produk</span><strong>' + self.esc(o.productName) + '</strong></div>' +
+              '<div class="order-card-row"><span>Harga</span><strong class="neon">Rp ' + self.fmt(o.price) + '</strong></div>' +
+              '<div class="order-card-row"><span>Status</span><span class="badge badge-' + st + '">' + self.esc(o.status) + '</span></div>' +
+              '<div class="order-card-bukti">' + buktiHtml(o) + '</div>' +
+              '<div class="order-card-aksi">' + aksiHtml(o) + '</div></div>';
+          }).join("");
+        }
       });
     } catch (e) {}
   },
@@ -790,12 +853,16 @@ const App = {
     var video = String((document.getElementById("pVideo") || {}).value || "").trim();
     var discount = parseInt((document.getElementById("pDiscount") || {}).value, 10) || 0;
     var discountDays = parseInt((document.getElementById("pDiscountDays") || {}).value, 10) || 0;
-    if (!name || !price) return this.toast("Nama & harga wajib", "error");
+    var isFree = !!(document.getElementById("pIsFree") && document.getElementById("pIsFree").checked);
+    if (!name) return this.toast("Nama wajib", "error");
+    if (!isFree && !price) return this.toast("Harga wajib (atau centang GRATIS)", "error");
+    if (isFree) price = 0;
 
     var data = {
-      name: name, price: price, desc: desc, download: download, video: video,
-      discount: discount, discountDays: discountDays,
-      discountStart: discount > 0 ? Date.now() : null,
+      name: name, price: price || 0, desc: desc, download: download, video: video,
+      isFree: isFree,
+      discount: isFree ? 0 : discount, discountDays: isFree ? 0 : discountDays,
+      discountStart: (!isFree && discount > 0) ? Date.now() : null,
       updatedAt: Date.now()
     };
     if (!idEl || !idEl.value) data.createdAt = Date.now();
@@ -821,6 +888,8 @@ const App = {
     document.getElementById("pVideo").value = p.video || "";
     document.getElementById("pDiscount").value = p.discount || 0;
     document.getElementById("pDiscountDays").value = p.discountDays || 0;
+    var freeCb = document.getElementById("pIsFree");
+    if (freeCb) freeCb.checked = !!p.isFree;
     this.showAdminSection("addproduct");
   },
 
@@ -841,6 +910,7 @@ const App = {
     });
     var d = document.getElementById("pDiscount"); if (d) d.value = "0";
     var dd = document.getElementById("pDiscountDays"); if (dd) dd.value = "0";
+    var freeCb = document.getElementById("pIsFree"); if (freeCb) freeCb.checked = false;
   },
 
   createAdminKey: function () {
@@ -998,28 +1068,47 @@ const App = {
 
   _refreshPaymentPrice: function () {
     var pending = getPendingPayment();
-    if (!pending || !this._appliedPromo) return;
-    var base = pending.priceOriginal || pending.price;
-    var pct = this._appliedPromo.percent;
-    var final = Math.round(Number(base) * (1 - pct / 100));
+    if (!pending || !pending.orderId) {
+      this.toast("Buat order dulu (Buy Now) sebelum pakai kode", "error");
+      return;
+    }
+    if (!this._appliedPromo) return;
+    var base = Number(pending.priceOriginal != null ? pending.priceOriginal : pending.price) || 0;
+    if (!pending.priceOriginal) pending.priceOriginal = base;
+    var pct = Number(this._appliedPromo.percent) || 0;
+    var final = Math.max(0, Math.round(base * (1 - pct / 100)));
     pending.price = final;
     pending.promoCode = this._appliedPromo.code;
     pending.promoPercent = pct;
-    if (!pending.priceOriginal) pending.priceOriginal = base;
     setPendingPayment(pending.orderId, pending);
+
+    // Update UI langsung (tanpa nunggu Firebase)
+    var info = document.getElementById("orderInfo");
+    if (info) {
+      info.innerHTML =
+        "<div><span>Order ID</span><span>" + this.esc(pending.orderId) + "</span></div>" +
+        "<div><span>Produk</span><span>" + this.esc(pending.productName || "-") + "</span></div>" +
+        '<div><span>Harga awal</span><span style="text-decoration:line-through;color:var(--muted)">Rp ' + this.fmt(base) + "</span></div>" +
+        '<div><span>Diskon (' + this.esc(pending.promoCode) + ')</span><span style="color:var(--success)">-' + pct + "%</span></div>" +
+        '<div><span>Total bayar</span><span class="neon" id="payTotalDisplay">Rp ' + this.fmt(final) + "</span></div>" +
+        '<div><span>User ID</span><span style="font-size:0.75rem">' + this.esc(this.userId) + "</span></div>";
+    }
+
+    var self = this;
     try {
       getOrdersRef().child(pending.orderId).update({
         price: final,
         promoCode: this._appliedPromo.code,
         promoPercent: pct,
-        priceOriginal: pending.priceOriginal || base
+        priceOriginal: base
+      }).then(function () {
+        self.toast("Harga diupdate: Rp " + self.fmt(final), "success");
+      }).catch(function (e) {
+        self.toast(e.message || "Gagal simpan harga", "error");
       });
-    } catch (e) {}
-    var self = this;
-    getOrdersRef().child(pending.orderId).once("value").then(function (snap) {
-      var o = snap.val();
-      if (o) self.showPaymentPage(Object.assign({ id: pending.orderId }, o));
-    });
+    } catch (e) {
+      this.toast(e.message, "error");
+    }
   },
 
   savePromo: function () {
@@ -1129,6 +1218,49 @@ const App = {
       return "Support: yansupport1@gmail.com · Telegram @yanzking122";
     }
     return "Saya bantu: cara bayar, kode diskon, status, produk, download, support. Tanya lebih spesifik ya.";
+  },
+
+
+  openFree: function (id) {
+    var p = this.products[id];
+    if (!p) return this.toast("Produk tidak ditemukan", "error");
+    this._freeProductId = id;
+    var nameEl = document.getElementById("freeProductName");
+    if (nameEl) nameEl.textContent = p.name + " — ikuti langkah di bawah";
+    var res = document.getElementById("freeResult");
+    if (res) res.innerHTML = "";
+    this.showView("free");
+  },
+
+  claimFree: function () {
+    var id = this._freeProductId;
+    var p = this.products[id];
+    if (!p) return this.toast("Produk tidak ditemukan", "error");
+    var link = p.download || "";
+    var res = document.getElementById("freeResult");
+    if (!link) {
+      if (res) res.innerHTML = '<p style="color:var(--danger)">Link download belum di-set admin.</p>';
+      return;
+    }
+    // simpan ke riwayat user
+    var orderId = "free_" + Date.now().toString(36);
+    try {
+      ensureDb().ref("users/" + this.userId + "/purchases/" + orderId).set({
+        productName: p.name,
+        price: 0,
+        downloadLink: link,
+        free: true,
+        at: Date.now()
+      });
+    } catch (e) {}
+    if (res) {
+      res.innerHTML =
+        '<div style="padding:16px;background:rgba(0,230,118,0.1);border-radius:14px;border:1px solid rgba(0,230,118,0.28)">' +
+          '<strong style="color:var(--success)"><i class="fa-solid fa-circle-check"></i> Siap download</strong>' +
+          '<a href="' + this.escAttr(link) + '" target="_blank" class="btn btn-success btn-block" style="margin-top:12px">' +
+            '<i class="fa-solid fa-download"></i> Download</a></div>';
+    }
+    this.toast("Link download siap", "success");
   },
 
   esc: function (str) {
