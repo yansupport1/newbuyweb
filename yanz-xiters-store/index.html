@@ -91,13 +91,16 @@
     </section>
 
     <!-- PRODUCTS -->
-    <section id="view-products" class="view">
-      <h2 class="section-title neon-soft" style="margin-top:36px">
-        <i class="fa-solid fa-boxes-stacked"></i> Semua Produk
+        <section id="view-products" class="view">
+      <h2 class="section-title neon-soft">
+        <i class="fa-solid fa-boxes-stacked"></i> Produk Berbayar
       </h2>
-      <div class="products-grid" id="allProducts">
-        <div class="loader"></div>
-      </div>
+      <div class="products-grid" id="paidProducts"></div>
+      <h2 class="section-title neon-soft" style="margin-top:36px">
+        <i class="fa-solid fa-gift"></i> Produk Gratis
+      </h2>
+      <p style="text-align:center;color:var(--muted);font-size:0.9rem;margin:-8px 0 18px">Follow TikTok &amp; join saluran untuk klaim</p>
+      <div class="products-grid" id="freeProducts"></div>
     </section>
 
     <!-- PROFILE -->
@@ -257,7 +260,7 @@
 
             <div id="admin-orders" class="admin-section active">
               <h2 class="section-title"><i class="fa-solid fa-receipt"></i> Bukti Transfer</h2>
-              <div class="table-wrap glass">
+              <div class="table-wrap glass desktop-table">
                 <table>
                   <thead>
                     <tr>
@@ -275,6 +278,7 @@
                   </tbody>
                 </table>
               </div>
+              <div class="orders-cards" id="ordersCards"></div>
             </div>
 
             <div id="admin-products" class="admin-section">

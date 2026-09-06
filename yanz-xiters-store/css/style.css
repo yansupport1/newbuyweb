@@ -1845,3 +1845,240 @@ tr:hover td {
   border-radius: 6px;
   font-weight: 700;
 }
+
+/* ===== Admin Bukti TF - fix offset & responsive ===== */
+#view-admin .container,
+#view-admin {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+.admin-layout {
+  display: grid !important;
+  grid-template-columns: minmax(0, 220px) minmax(0, 1fr) !important;
+  gap: 16px !important;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 16px 0 40px !important;
+  overflow: hidden;
+}
+
+.admin-sidebar {
+  min-width: 0;
+  max-width: 100%;
+  position: sticky;
+  top: 80px;
+  align-self: start;
+}
+
+.admin-content {
+  min-width: 0 !important;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.admin-section {
+  min-width: 0;
+  max-width: 100%;
+}
+
+#admin-orders .table-wrap,
+.table-wrap.glass {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto !important;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 14px;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+#admin-orders table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+
+#admin-orders th,
+#admin-orders td {
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  vertical-align: middle;
+}
+
+#admin-orders td:last-child {
+  position: sticky;
+  right: 0;
+  background: rgba(12, 6, 10, 0.95);
+  z-index: 1;
+  box-shadow: -6px 0 12px rgba(0,0,0,0.25);
+}
+
+/* Card list for mobile instead of broken table */
+.orders-cards {
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.order-card {
+  padding: 14px;
+  border-radius: 14px;
+  text-align: left;
+}
+.order-card .oc-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 0.85rem;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.order-card .oc-row:last-child { border-bottom: none; }
+.order-card .oc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.order-card img.bukti-thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  cursor: zoom-in;
+}
+
+@media (max-width: 900px) {
+  .admin-layout {
+    grid-template-columns: 1fr !important;
+  }
+  .admin-sidebar {
+    position: static !important;
+  }
+  .admin-menu {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .admin-menu-btn {
+    flex: 1 1 auto;
+    min-width: 42%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 640px) {
+  #admin-orders .table-wrap.desktop-table {
+    display: none !important;
+  }
+  #admin-orders .orders-cards {
+    display: flex !important;
+  }
+  .admin-menu-btn {
+    min-width: 46%;
+    font-size: 0.78rem;
+    padding: 11px 8px;
+  }
+  .container {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
+
+/* Order cards mobile */
+.orders-cards {
+  display: none;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 12px;
+}
+.order-card {
+  padding: 16px;
+  border-radius: 14px;
+}
+.order-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 0.88rem;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.order-card-bukti {
+  margin: 12px 0;
+  text-align: center;
+}
+.order-card-aksi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.bukti-thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 10px;
+  cursor: zoom-in;
+  border: 1px solid rgba(255,60,80,0.25);
+}
+.order-card .bukti-thumb {
+  width: 100%;
+  max-width: 220px;
+  height: auto;
+  max-height: 180px;
+}
+
+@media (max-width: 900px) {
+  .admin-layout {
+    grid-template-columns: 1fr !important;
+  }
+  .admin-sidebar {
+    position: relative !important;
+    top: 0 !important;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 12px !important;
+  }
+  .admin-sidebar-title { width: 100%; margin-bottom: 4px; }
+  .admin-menu {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+  }
+  .admin-menu-btn {
+    flex: 1 1 auto;
+    min-width: calc(50% - 6px);
+    font-size: 0.78rem;
+    padding: 10px 8px !important;
+  }
+  #admin-orders .desktop-table {
+    display: none !important;
+  }
+  .orders-cards {
+    display: flex !important;
+  }
+}
+
+@media (min-width: 901px) {
+  .orders-cards { display: none !important; }
+  #admin-orders .desktop-table { display: block !important; }
+}
+
+/* Prevent horizontal page offset */
+html, body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+#view-admin, #adminPanel, .admin-content, .admin-section {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}

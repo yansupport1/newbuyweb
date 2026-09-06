@@ -309,13 +309,15 @@ const App = {
       );
     }
 
+    var paidEl = document.getElementById("paidProducts");
+    var freeEl = document.getElementById("freeProducts");
     var allEl = document.getElementById("allProducts");
-    if (!list.length) {
-      var empty = '<div class="empty"><i class="fa-solid fa-box-open"></i>Belum ada produk</div>';
-      if (allEl) allEl.innerHTML = empty;
-      return;
-    }
-    if (allEl) allEl.innerHTML = list.map(function (p, i) { return card(p, i * 40); }).join("");
+    var paid = list.filter(function (p) { return !p.isFree; });
+    var free = list.filter(function (p) { return !!p.isFree; });
+    var empty = '<div class="empty"><i class="fa-solid fa-box-open"></i>Belum ada produk</div>';
+    if (paidEl) paidEl.innerHTML = paid.length ? paid.map(function (p, i) { return card(p, i * 40); }).join("") : empty;
+    if (freeEl) freeEl.innerHTML = free.length ? free.map(function (p, i) { return card(p, i * 40); }).join("") : empty;
+    if (allEl && !paidEl) allEl.innerHTML = list.length ? list.map(function (p, i) { return card(p, i * 40); }).join("") : empty;
     this.renderAdminProducts();
   },
 
@@ -370,11 +372,22 @@ const App = {
     this._currentOrderId = order.id;
     var info = document.getElementById("orderInfo");
     if (info) {
+      var base = order.priceOriginal != null ? order.priceOriginal : null;
+      var hasPromo = !!(order.promoCode && order.promoPercent);
+      var priceBlock = "";
+      if (hasPromo && base != null) {
+        priceBlock =
+          '<div><span>Harga awal</span><span style="text-decoration:line-through;color:var(--muted)">Rp ' + this.fmt(base) + "</span></div>" +
+          '<div><span>Diskon (' + this.esc(String(order.promoCode)) + ')</span><span style="color:var(--success)">-' + order.promoPercent + "%</span></div>" +
+          '<div><span>Total bayar</span><span class="neon">Rp ' + this.fmt(order.price) + "</span></div>";
+      } else {
+        priceBlock = '<div><span>Total</span><span class="neon">Rp ' + this.fmt(order.price) + "</span></div>";
+      }
       info.innerHTML =
         "<div><span>Order ID</span><span>" + this.esc(order.id) + "</span></div>" +
         "<div><span>Produk</span><span>" + this.esc(order.productName) + "</span></div>" +
-        '<div><span>Total</span><span class="neon">Rp ' + this.fmt(order.price) + "</span></div>" +
-        "<div><span>User ID</span><span style=\"font-size:0.75rem\">" + this.esc(order.userId) + "</span></div>";
+        priceBlock +
+        '<div><span>User ID</span><span style="font-size:0.75rem">' + this.esc(order.userId) + "</span></div>";
     }
 
     var qrUrl = (CONFIG && CONFIG.qrPaymentUrl) ? String(CONFIG.qrPaymentUrl).trim() : "";
@@ -675,42 +688,56 @@ const App = {
         snap.forEach(function (c) { orders.push(Object.assign({ id: c.key }, c.val())); });
         orders.reverse();
         var tbody = document.getElementById("ordersTableBody");
-        if (!tbody) return;
+        var cards = document.getElementById("ordersCards");
         if (!orders.length) {
-          tbody.innerHTML = '<tr><td colspan="7" class="empty">Belum ada order</td></tr>';
+          if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="empty">Belum ada order</td></tr>';
+          if (cards) cards.innerHTML = '<div class="empty">Belum ada order</div>';
           return;
         }
-        tbody.innerHTML = orders.map(function (o) {
-          var st = o.status === "approved" ? "approved" : o.status === "rejected" ? "rejected" : "pending";
-          var aksi = "-";
+        function aksiHtml(o) {
           if (o.status === "pending" && o.buktiTf) {
-            aksi =
-              '<button class="btn btn-success btn-sm" onclick="App.verifyOrder(\'' + o.id + '\', true)"><i class="fa-solid fa-check"></i> Terima</button> ' +
+            return '<button class="btn btn-success btn-sm" onclick="App.verifyOrder(\'' + o.id + '\', true)"><i class="fa-solid fa-check"></i> Terima</button> ' +
               '<button class="btn btn-danger btn-sm" onclick="App.verifyOrder(\'' + o.id + '\', false)"><i class="fa-solid fa-xmark"></i> Tolak</button>';
-          } else if (o.status === "approved") {
-            aksi =
-              '<button class="btn btn-ghost btn-sm" onclick="App.copyReceipt(\'' + o.id + '\')"><i class="fa-solid fa-copy"></i> Salin</button> ' +
-              '<button class="btn btn-ghost btn-sm" onclick="App.printReceipt(\'' + o.id + '\')"><i class="fa-solid fa-print"></i> Cetak</button>';
           }
-          var buktiCell = "-";
-          if (o.buktiTf) {
-            if (String(o.buktiTf).indexOf("data:image") === 0) {
-              buktiCell = '<img src="' + o.buktiTf + '" alt="bukti" style="width:48px;height:48px;object-fit:cover;border-radius:8px;cursor:zoom-in" onclick="App.openLightbox(this.src)" />';
-            } else {
-              buktiCell = '<a href="' + self.escAttr(o.buktiTf) + '" target="_blank" style="color:var(--blood-neon)"><i class="fa-solid fa-eye"></i></a>';
-            }
+          if (o.status === "approved") {
+            return '<button class="btn btn-ghost btn-sm" onclick="App.copyReceipt(\'' + o.id + '\')"><i class="fa-solid fa-copy"></i></button> ' +
+              '<button class="btn btn-ghost btn-sm" onclick="App.printReceipt(\'' + o.id + '\')"><i class="fa-solid fa-print"></i></button>';
           }
-          return (
-            "<tr>" +
+          return "-";
+        }
+        function buktiHtml(o) {
+          if (!o.buktiTf) return "-";
+          if (String(o.buktiTf).indexOf("data:image") === 0) {
+            return '<img src="' + o.buktiTf + '" alt="bukti" class="bukti-thumb" onclick="App.openLightbox(this.src)" />';
+          }
+          return '<a href="' + self.escAttr(o.buktiTf) + '" target="_blank" style="color:var(--blood-neon)"><i class="fa-solid fa-eye"></i></a>';
+        }
+        if (tbody) {
+          tbody.innerHTML = orders.map(function (o) {
+            var st = o.status === "approved" ? "approved" : o.status === "rejected" ? "rejected" : "pending";
+            return "<tr>" +
               '<td style="font-size:0.72rem">' + self.esc(o.id) + "</td>" +
               '<td style="font-size:0.72rem">' + self.esc(o.userId || "-") + "</td>" +
               "<td>" + self.esc(o.productName) + "</td>" +
               "<td>Rp " + self.fmt(o.price) + "</td>" +
-              "<td>" + buktiCell + "</td>" +
+              "<td>" + buktiHtml(o) + "</td>" +
               '<td><span class="badge badge-' + st + '">' + self.esc(o.status) + "</span></td>" +
-              "<td>" + aksi + "</td></tr>"
-          );
-        }).join("");
+              "<td>" + aksiHtml(o) + "</td></tr>";
+          }).join("");
+        }
+        if (cards) {
+          cards.innerHTML = orders.map(function (o) {
+            var st = o.status === "approved" ? "approved" : o.status === "rejected" ? "rejected" : "pending";
+            return '<div class="order-card glass">' +
+              '<div class="order-card-row"><span>Order</span><strong>' + self.esc(o.id) + '</strong></div>' +
+              '<div class="order-card-row"><span>User</span><span style="font-size:0.75rem">' + self.esc(o.userId || "-") + '</span></div>' +
+              '<div class="order-card-row"><span>Produk</span><strong>' + self.esc(o.productName) + '</strong></div>' +
+              '<div class="order-card-row"><span>Harga</span><strong class="neon">Rp ' + self.fmt(o.price) + '</strong></div>' +
+              '<div class="order-card-row"><span>Status</span><span class="badge badge-' + st + '">' + self.esc(o.status) + '</span></div>' +
+              '<div class="order-card-bukti">' + buktiHtml(o) + '</div>' +
+              '<div class="order-card-aksi">' + aksiHtml(o) + '</div></div>';
+          }).join("");
+        }
       });
     } catch (e) {}
   },
@@ -1041,28 +1068,47 @@ const App = {
 
   _refreshPaymentPrice: function () {
     var pending = getPendingPayment();
-    if (!pending || !this._appliedPromo) return;
-    var base = pending.priceOriginal || pending.price;
-    var pct = this._appliedPromo.percent;
-    var final = Math.round(Number(base) * (1 - pct / 100));
+    if (!pending || !pending.orderId) {
+      this.toast("Buat order dulu (Buy Now) sebelum pakai kode", "error");
+      return;
+    }
+    if (!this._appliedPromo) return;
+    var base = Number(pending.priceOriginal != null ? pending.priceOriginal : pending.price) || 0;
+    if (!pending.priceOriginal) pending.priceOriginal = base;
+    var pct = Number(this._appliedPromo.percent) || 0;
+    var final = Math.max(0, Math.round(base * (1 - pct / 100)));
     pending.price = final;
     pending.promoCode = this._appliedPromo.code;
     pending.promoPercent = pct;
-    if (!pending.priceOriginal) pending.priceOriginal = base;
     setPendingPayment(pending.orderId, pending);
+
+    // Update UI langsung (tanpa nunggu Firebase)
+    var info = document.getElementById("orderInfo");
+    if (info) {
+      info.innerHTML =
+        "<div><span>Order ID</span><span>" + this.esc(pending.orderId) + "</span></div>" +
+        "<div><span>Produk</span><span>" + this.esc(pending.productName || "-") + "</span></div>" +
+        '<div><span>Harga awal</span><span style="text-decoration:line-through;color:var(--muted)">Rp ' + this.fmt(base) + "</span></div>" +
+        '<div><span>Diskon (' + this.esc(pending.promoCode) + ')</span><span style="color:var(--success)">-' + pct + "%</span></div>" +
+        '<div><span>Total bayar</span><span class="neon" id="payTotalDisplay">Rp ' + this.fmt(final) + "</span></div>" +
+        '<div><span>User ID</span><span style="font-size:0.75rem">' + this.esc(this.userId) + "</span></div>";
+    }
+
+    var self = this;
     try {
       getOrdersRef().child(pending.orderId).update({
         price: final,
         promoCode: this._appliedPromo.code,
         promoPercent: pct,
-        priceOriginal: pending.priceOriginal || base
+        priceOriginal: base
+      }).then(function () {
+        self.toast("Harga diupdate: Rp " + self.fmt(final), "success");
+      }).catch(function (e) {
+        self.toast(e.message || "Gagal simpan harga", "error");
       });
-    } catch (e) {}
-    var self = this;
-    getOrdersRef().child(pending.orderId).once("value").then(function (snap) {
-      var o = snap.val();
-      if (o) self.showPaymentPage(Object.assign({ id: pending.orderId }, o));
-    });
+    } catch (e) {
+      this.toast(e.message, "error");
+    }
   },
 
   savePromo: function () {
